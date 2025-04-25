@@ -18,6 +18,7 @@ A high-performance cellular automaton simulator powered by GPU compute shaders. 
   - Toggle "Lucky Cell" rule
   - Adjust lucky cell survival chance (0-100%)
   - Adjust brush size
+  - Control simulation speed
 - **Zoom & Pan**: Navigate across the simulation space
 - **Configurable Rules**: Classic Conway's rules with customization options via GUI and shaders
 - **Lucky Cells**: Configurable chance (default 10%) for dying cells to survive and turn red

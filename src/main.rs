@@ -208,6 +208,22 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                 );
                                 ui.separator();
 
+                                // Add simulation speed slider
+                                ui.label("Simulation Speed:");
+                                ui.add(egui::Slider::new(&mut state.simulation_speed, 1..=240)
+                                    .text("Steps/second")
+                                    .logarithmic(true)
+                                    .custom_formatter(|val, _| {
+                                        if val <= 1.0 {
+                                            "1 step/sec".to_string()
+                                        } else if val >= 240.0 {
+                                            "240 steps/sec".to_string()
+                                        } else {
+                                            format!("{:.0} steps/sec", val)
+                                        }
+                                    }));
+                                ui.separator();
+
                                 ui.label("Load Custom Shader Rule:");
                                 if ui.button("Load from file...").clicked() {
                                     // TODO: Implement file loading logic

@@ -65,6 +65,10 @@ pub struct State {
     // Cell counting state
     pub live_cell_count: Option<u32>,
     pub last_count_update_time: Option<Instant>,
+    // Simulation speed control
+    pub simulation_speed: u32,           // Steps per second (1-240)
+    pub last_update_time: Instant,       // When we last ran a simulation step
+    pub accumulated_time: f32,           // Accumulated time for simulation steps
 }
 
 impl State {
@@ -107,7 +111,7 @@ impl State {
             format: surface_format,
             width: initial_grid_width,
             height: initial_grid_height,
-            present_mode: surface_caps.present_modes[0],
+            present_mode: wgpu::PresentMode::Immediate,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![surface_format.into()],
             desired_maximum_frame_latency: 2,
@@ -355,6 +359,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             // Cell counting state
             live_cell_count: None,
             last_count_update_time: None,
+            // Initialize simulation speed to 60 steps per second
+            simulation_speed: 60,
+            last_update_time: Instant::now(),
+            accumulated_time: 0.0,
         };
 
         // Now compile the *real* initial pipeline
@@ -526,21 +534,35 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             _padding: [0; 3],
         }));
 
-        // --- Compute Pass ---
-        let mut compute_encoder = self.device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Compute Encoder") });
-        {
-            let mut compute_pass = compute_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Game of Life Compute Pass"),
-                timestamp_writes: None,
-            });
-            compute_pass.set_pipeline(&self.compute_pipeline); // Use the current pipeline
-            compute_pass.set_bind_group(0, &self.compute_bind_groups[self.frame_num % 2], &[]);
-            let dispatch_x = (self.grid_width + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-            let dispatch_y = (self.grid_height + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-            compute_pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+        // Only run compute pass if it's time for a simulation update
+        let current_time = Instant::now();
+        let elapsed_time = current_time.duration_since(self.last_update_time);
+        self.accumulated_time += elapsed_time.as_secs_f32();
+        self.last_update_time = current_time;
+        
+        // Run simulation steps based on accumulated time
+        while self.accumulated_time >= 1.0 / self.simulation_speed as f32 {
+            self.accumulated_time -= 1.0 / self.simulation_speed as f32;
+            
+            // --- Compute Pass ---
+            let mut compute_encoder = self.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Compute Encoder") });
+            {
+                let mut compute_pass = compute_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Game of Life Compute Pass"),
+                    timestamp_writes: None,
+                });
+                compute_pass.set_pipeline(&self.compute_pipeline); // Use the current pipeline
+                compute_pass.set_bind_group(0, &self.compute_bind_groups[self.frame_num % 2], &[]);
+                let dispatch_x = (self.grid_width + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                let dispatch_y = (self.grid_height + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                compute_pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+            }
+            self.queue.submit(Some(compute_encoder.finish()));
+            
+            // Only increment frame_num when simulation actually runs
+            self.frame_num += 1;
         }
-        self.queue.submit(Some(compute_encoder.finish()));
 
         // --- Get Surface Texture (early exit on error) ---
         let output_frame = match self.surface.get_current_texture() {
@@ -587,8 +609,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         self.queue.submit(Some(render_encoder.finish()));
         // output_frame.present(); // DON'T present here, egui will do it later
-
-        self.frame_num += 1;
 
         // Return the frame so egui can render to it
         Ok(output_frame)
