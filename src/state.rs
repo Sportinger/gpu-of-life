@@ -13,6 +13,8 @@ use std::borrow::Cow; // Needed for ShaderSource
 use egui_winit::State as EguiWinitState;
 use egui_wgpu::Renderer as EguiWgpuRenderer;
 use egui::Context as EguiContext;
+use std::time::Instant;
+use std::time::Duration; // For throttling
 
 // const BRUSH_RADIUS: i32 = 3; // Remove constant, will use state field
 
@@ -60,6 +62,9 @@ pub struct State {
     pub lucky_rule_enabled: bool,
     pub brush_radius: u32,
     pub lucky_chance_percent: u32,
+    // Cell counting state
+    pub live_cell_count: Option<u32>,
+    pub last_count_update_time: Option<Instant>,
 }
 
 impl State {
@@ -347,6 +352,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             lucky_rule_enabled: false,
             brush_radius: 3,
             lucky_chance_percent: 10,
+            // Cell counting state
+            live_cell_count: None,
+            last_count_update_time: None,
         };
 
         // Now compile the *real* initial pipeline
@@ -584,6 +592,80 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         // Return the frame so egui can render to it
         Ok(output_frame)
+    }
+
+    /// Reads the current grid state back from the GPU and updates the live cell count.
+    /// WARNING: This is a blocking operation and will stall the GPU pipeline!
+    pub fn update_live_cell_count(&mut self) {
+        // Buffer containing the latest simulation state (the one about to be rendered)
+        let source_buffer_index = (self.frame_num + 1) % 2;
+        let source_buffer = &self.grid_buffers[source_buffer_index];
+
+        let buffer_size = (self.grid_width * self.grid_height * std::mem::size_of::<f32>() as u32) as wgpu::BufferAddress;
+
+        // Create a staging buffer (CPU-visible) to copy the data into
+        let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Cell Count Staging Buffer"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        // Create command encoder to copy data
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Cell Count Copy Encoder"),
+        });
+
+        // Copy data from GPU grid buffer to CPU staging buffer
+        encoder.copy_buffer_to_buffer(
+            source_buffer,       // Source GPU buffer
+            0,                   // Source offset
+            &staging_buffer,     // Destination CPU buffer
+            0,                   // Destination offset
+            buffer_size,         // Size
+        );
+
+        // Submit the copy command to the GPU queue
+        self.queue.submit(Some(encoder.finish()));
+
+        // Request mapping of the staging buffer
+        let buffer_slice = staging_buffer.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel(); // Use a channel for async map result
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            sender.send(result).unwrap();
+        });
+
+        // Poll the device Csync!! THIS WILL BLOCK until the GPU finishes the copy and mapping.
+        self.device.poll(wgpu::Maintain::Wait);
+
+        // Receive the mapping result
+        match receiver.recv() {
+            Ok(Ok(())) => {
+                // Get the mapped data
+                let data = buffer_slice.get_mapped_range();
+                let cell_states: &[f32] = bytemuck::cast_slice(&data);
+
+                // Count live cells (value > 0.5)
+                let count = cell_states.iter().filter(|&&state| state > 0.5).count();
+
+                // Update state
+                self.live_cell_count = Some(count as u32);
+                self.last_count_update_time = Some(Instant::now()); // Record update time
+
+                // Drop the mapped view
+                drop(data);
+                // Unmap the buffer
+                staging_buffer.unmap();
+            }
+            Ok(Err(e)) => {
+                log::error!("Failed to map staging buffer for cell count: {:?}", e);
+                self.live_cell_count = None; // Indicate error/unknown state
+            }
+            Err(e) => {
+                 log::error!("Failed to receive cell count map result: {:?}", e);
+                 self.live_cell_count = None;
+            }
+        }
     }
 
     pub fn paint_cell(&mut self, screen_pos: PhysicalPosition<f64>) {

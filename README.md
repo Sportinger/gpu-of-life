@@ -1,4 +1,4 @@
-# 🌠 GPU Game of Life
+# 🌠 GPU of Life
 
 A high-performance cellular automaton simulator powered by GPU compute shaders. This implementation of Conway's Game of Life runs entirely on your graphics card for blazing-fast simulation of large grids.
 

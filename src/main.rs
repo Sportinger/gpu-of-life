@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 // GUI Imports
 use egui;
+use std::time::{Instant, Duration}; // Import time types
 
 // Constants
 const GRID_WIDTH: u32 = 256;
@@ -106,6 +107,34 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                             }
                         };
 
+                        // --- Update Cell Count (throttled) ---
+                        let mut should_update_count = false;
+                        if state.menu_open {
+                            match state.last_count_update_time {
+                                Some(last_update) => {
+                                    if Instant::now().duration_since(last_update) > Duration::from_secs(1) {
+                                        should_update_count = true;
+                                    }
+                                }
+                                None => {
+                                    // No count yet, update immediately when menu opens
+                                    should_update_count = true;
+                                }
+                            }
+                        }
+                        // Reset count if menu closed
+                        // if !state.menu_open {
+                        //     state.live_cell_count = None;
+                        //     state.last_count_update_time = None;
+                        // }
+                        // Perform the potentially blocking update
+                        if should_update_count {
+                            log::info!("Updating live cell count (GPU readback)...");
+                            state.update_live_cell_count();
+                            log::info!("Cell count update finished.");
+                        }
+
+                        // --- Egui Frame and UI Definition ---
                         let output_view = output_frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
                         // Begin egui frame
@@ -129,7 +158,7 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                         if state.menu_open {
                             // Define a frame with a semi-transparent background
                             let panel_frame = egui::Frame {
-                                fill: egui::Color32::from_rgba_unmultiplied(25, 25, 25, 230), // Dark grey, ~90% opaque (adjust alpha 0-255)
+                                fill: egui::Color32::from_rgba_unmultiplied(25, 25, 25, 100), // Dark grey, ~40% opaque
                                 ..egui::Frame::side_top_panel(&state.egui_ctx.style())
                             };
 
@@ -159,6 +188,10 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                 ui.label(format!("Offset: [{:.1}, {:.1}]", state.view_offset[0], state.view_offset[1]));
                                 ui.label(format!("Grid: {}x{}", state.grid_width, state.grid_height));
                                 ui.label(format!("Frame: {}", state.frame_num));
+                                // Display live cell count
+                                ui.label(format!("Live Cells: {}",
+                                    state.live_cell_count.map_or_else(|| "N/A".to_string(), |count| count.to_string())
+                                ));
 
                                 ui.separator();
                                 ui.add(egui::Slider::new(&mut state.brush_radius, 0..=20).text("Brush Radius"));

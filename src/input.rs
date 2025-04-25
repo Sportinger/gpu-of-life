@@ -25,22 +25,19 @@ pub fn handle_zoom(state: &mut State, delta: f32) {
         let cursor_screen_x = cursor_pos.x as f32;
         let cursor_screen_y = cursor_pos.y as f32;
 
-        // Adjust offset based on cursor position to zoom towards the cursor
-        // V_new = V_old + (factor - 1) * (C + V_old / Z_old)
-        // Note: Screen coords C are relative to window, view_offset V is grid coords.
-        // Convert screen coords to "world" coords (relative to grid origin at current zoom)
-        let world_x = (cursor_screen_x - state.size.width as f32 / 2.0) / old_zoom + state.view_offset[0];
-        let world_y = (cursor_screen_y - state.size.height as f32 / 2.0) / old_zoom + state.view_offset[1];
+        // 1. Calculate world coordinate under cursor BEFORE zoom
+        let world_x = (cursor_screen_x + state.view_offset[0]) / old_zoom;
+        let world_y = (cursor_screen_y + state.view_offset[1]) / old_zoom;
 
-        // Calculate where the new view offset should be to keep the world point under the cursor
-        new_offset[0] = world_x - (cursor_screen_x - state.size.width as f32 / 2.0) / new_zoom;
-        new_offset[1] = world_y - (cursor_screen_y - state.size.height as f32 / 2.0) / new_zoom;
+        // 2. Calculate the required offset AFTER zoom to keep the world point under the cursor
+        new_offset[0] = world_x * new_zoom - cursor_screen_x;
+        new_offset[1] = world_y * new_zoom - cursor_screen_y;
 
-    } // If cursor is outside window, zoom towards center (no offset change needed)
-
-    // Clamp offset if zoom gets very close to MIN_ZOOM
-    if (new_zoom - MIN_ZOOM).abs() < f32::EPSILON {
-         new_offset = [0.0, 0.0];
+    } else {
+        // Optional: Fallback behavior if cursor is not in window (e.g., zoom towards center)
+        // Currently does nothing, keeping the previous offset which effectively centers zoom on (0,0) world space.
+        // Or, could calculate center screen coords and use those like the formula above.
+        // For simplicity, we'll keep the current behavior: zoom towards origin if cursor is outside.
     }
 
     state.zoom = new_zoom;
@@ -73,21 +70,13 @@ pub fn handle_cursor_move(state: &mut State, position: PhysicalPosition<f64>) {
 
     if state.is_right_mouse_pressed {
         if let Some(last_pos) = state.last_mouse_pos {
-            // Calculate delta in screen coordinates
             let dx_screen = position.x - last_pos.x;
             let dy_screen = position.y - last_pos.y;
 
-            // Convert screen delta to grid delta based on current zoom
-            // Panning should feel like dragging the grid, so movement is inversely proportional to zoom.
-            let dx_grid = dx_screen / state.zoom as f64;
-            let dy_grid = dy_screen / state.zoom as f64;
-
-            // Map mouse movement to view offset in a way that vertical drag pans vertically and horizontal drag pans horizontally.
-            // Horizontal drag updates x offset (index 0)
-            state.view_offset[0] -= dx_grid as f32;
-
-            // Vertical drag updates y offset (index 1)
-            state.view_offset[1] -= dy_grid as f32;
+            // Map mouse movement (screen delta) directly to view offset for consistent panning speed.
+            // Subtracting the screen delta makes the view move with the cursor drag.
+            state.view_offset[0] -= dx_screen as f32;
+            state.view_offset[1] -= dy_screen as f32;
 
             // Ensure we don't pan outside the grid
             clamp_offset(state);
