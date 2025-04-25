@@ -159,7 +159,7 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                         if state.menu_open {
                             // Define a frame with a semi-transparent background
                             let panel_frame = egui::Frame {
-                                fill: egui::Color32::from_rgba_unmultiplied(25, 25, 25, 128), // Dark grey, 50% opaque
+                                fill: egui::Color32::from_rgba_unmultiplied(25, 25, 25, 204), // Dark grey, 80% opaque (20% transparent)
                                 ..egui::Frame::side_top_panel(&state.egui_ctx.style())
                             };
 
@@ -283,6 +283,7 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                     .show(&state.egui_ctx, |ui| {
                                         // Create a frame for the context menu
                                         egui::Frame::popup(&state.egui_ctx.style())
+                                            .fill(egui::Color32::from_rgba_unmultiplied(25, 25, 25, 204)) // 80% opaque (20% transparent)
                                             .show(ui, |ui| {
                                                 ui.set_min_width(150.0); // Set minimum width
                                                 
@@ -350,6 +351,7 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                     .show(&state.egui_ctx, |ui| {
                                         // Create a frame for the submenu
                                         egui::Frame::popup(&state.egui_ctx.style())
+                                            .fill(egui::Color32::from_rgba_unmultiplied(25, 25, 25, 204)) // 80% opaque (20% transparent)
                                             .show(ui, |ui| {
                                                 ui.set_min_width(150.0);
                                                 
