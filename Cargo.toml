@@ -9,4 +9,9 @@ winit = "0.29" # Or latest version
 env_logger = "0.11"
 pollster = "0.3"
 bytemuck = { version = "1.15", features = ["derive"] }
-log = "0.4" 
+log = "0.4"
+
+# GUI dependencies
+egui = "0.27"
+egui-winit = "0.27"
+egui-wgpu = "0.27" 

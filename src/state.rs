@@ -10,6 +10,11 @@ use std::sync::Arc;
 use std::num::NonZeroU64;
 use std::borrow::Cow; // Needed for ShaderSource
 
+// GUI Imports
+use egui_winit::State as EguiWinitState;
+use egui_wgpu::Renderer as EguiWgpuRenderer;
+use egui::Context as EguiContext;
+
 const BRUSH_RADIUS: i32 = 3; // radius in grid cells
 
 pub struct State {
@@ -47,6 +52,12 @@ pub struct State {
     pub is_left_mouse_pressed: bool,
     pub last_mouse_pos: Option<PhysicalPosition<f64>>,
     pub cursor_pos: Option<PhysicalPosition<f64>>, // For zoom centering
+
+    // GUI state
+    pub egui_ctx: EguiContext,
+    pub egui_winit_state: EguiWinitState,
+    pub egui_renderer: EguiWgpuRenderer,
+    pub menu_open: bool,
 }
 
 impl State {
@@ -232,6 +243,12 @@ impl State {
             &device, &render_bind_group_layout, &grid_buffers, &sim_param_buffer, &render_param_buffer
         );
 
+        log::info!("Initializing egui...");
+        let egui_ctx = EguiContext::default();
+        let egui_winit_state = EguiWinitState::new(egui_ctx.clone(), egui_ctx.viewport_id(), &window, None, None);
+        let egui_renderer = EguiWgpuRenderer::new(&device, config.format, None, 1);
+        log::info!("egui initialized.");
+
         log::info!("wgpu initialized successfully.");
 
         // Temporary compute pipeline before the real one is compiled
@@ -281,6 +298,10 @@ impl State {
             is_left_mouse_pressed: false,
             last_mouse_pos: None,
             cursor_pos: None,
+            egui_ctx,
+            egui_winit_state,
+            egui_renderer,
+            menu_open: false,
         };
 
         // Now compile the *real* initial pipeline
@@ -438,12 +459,13 @@ impl State {
         // call `load_new_compute_shader` with the new WGSL source.
     }
 
-    pub fn update_and_render(&mut self) {
+    /// Run simulation step & render the grid state. Returns the surface texture for egui to draw on.
+    pub fn update_and_render(&mut self) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
         // Update the simulation parameters with the current frame number
         self.queue.write_buffer(&self.sim_param_buffer, 0, bytemuck::bytes_of(&SimParams {
             width: self.grid_width,
             height: self.grid_height,
-            seed: self.frame_num as u32, // Use frame_num as seed for random changes
+            seed: self.frame_num as u32,
             _pad: 0,
         }));
 
@@ -463,21 +485,22 @@ impl State {
         }
         self.queue.submit(Some(compute_encoder.finish()));
 
-        // --- Render Pass ---
+        // --- Get Surface Texture (early exit on error) ---
         let output_frame = match self.surface.get_current_texture() {
              Ok(frame) => frame,
              Err(wgpu::SurfaceError::Lost) => {
                  log::warn!("Surface lost, recreating...");
                  self.resize(self.size); // Reconfigure the surface
-                 // Skip rendering this frame as we just reconfigured
-                 return;
+                 // Return the error, the caller (main loop) should handle skipping the frame
+                 return Err(wgpu::SurfaceError::Lost);
              }
              Err(e) => {
                  log::error!("Failed to acquire next swap chain texture: {:?}", e);
-                 return; // Skip rendering if we can't get a texture
+                 return Err(e);
              }
          };
 
+        // --- Render Pass ---
         let output_view = output_frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -506,9 +529,12 @@ impl State {
             render_pass.draw(0..3, 0..1); // Draw full-screen triangle
         }
         self.queue.submit(Some(render_encoder.finish()));
-        output_frame.present();
+        // output_frame.present(); // DON'T present here, egui will do it later
 
         self.frame_num += 1;
+
+        // Return the frame so egui can render to it
+        Ok(output_frame)
     }
 
     pub fn paint_cell(&mut self, screen_pos: PhysicalPosition<f64>) {

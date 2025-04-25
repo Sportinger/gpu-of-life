@@ -19,6 +19,9 @@ use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
 use std::num::NonZeroU64;
 
+// GUI Imports
+use egui;
+
 // Constants
 const GRID_WIDTH: u32 = 256;
 const GRID_HEIGHT: u32 = 256;
@@ -27,31 +30,54 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
     let mut state = State::new(window).await;
 
     event_loop.run(move |event, window_target| {
+        // Pass winit events to egui_winit - MOVED INSIDE WindowEvent arm
+
         window_target.set_control_flow(ControlFlow::Poll);
 
         match event {
-            Event::WindowEvent { window_id, event } if window_id == state.window.id() => match event {
+            Event::WindowEvent { window_id, ref event } // Use `ref event` here
+                if window_id == state.window.id() =>
+            {
+                // Pass window-specific events to egui_winit FIRST
+                let response = state.egui_winit_state.on_window_event(&state.window, event);
+
+                if response.repaint {
+                    state.window.request_redraw();
+                }
+
+                // If egui consumed the event, skip further processing for this event
+                // unless it was a Resize event, which the game needs to handle regardless.
+                let consumed_by_egui = response.consumed && !matches!(event, WindowEvent::Resized(_));
+
+                if consumed_by_egui {
+                     return;
+                }
+
+                // Now match on the event for game logic if egui didn't consume it
+                match event {
                 WindowEvent::CloseRequested => {
                     window_target.exit();
                 }
                 WindowEvent::Resized(new_size) => {
-                    state.resize(new_size);
+                        state.resize(*new_size); // Resize must happen even if egui uses it
+                        // egui also needs to know about the resize for its layout
+                        // state.egui_renderer.resize() // This isn't needed, handled by screen descriptor
                 }
                 WindowEvent::MouseInput { state: element_state, button, .. } => {
-                    input::handle_mouse_input(&mut state, button, element_state);
+                        input::handle_mouse_input(&mut state, *button, *element_state);
                 }
                 WindowEvent::CursorMoved { position, .. } => {
-                    input::handle_cursor_move(&mut state, position);
+                        input::handle_cursor_move(&mut state, *position);
                 }
                 WindowEvent::CursorLeft { .. } => {
                     input::handle_cursor_left(&mut state);
                 }
                 WindowEvent::MouseWheel { delta, .. } => {
                     let scroll_amount = match delta {
-                        MouseScrollDelta::LineDelta(_, y) => y,
+                            MouseScrollDelta::LineDelta(_, y) => *y,
                         MouseScrollDelta::PixelDelta(pos) => {
                             if pos.y.abs() > 0.0 {
-                                (pos.y / 20.0) as f32 // Arbitrary scaling
+                                    (pos.y / 20.0) as f32
                             } else {
                                 0.0
                             }
@@ -62,10 +88,144 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                     }
                 }
                 WindowEvent::RedrawRequested => {
-                    state.update_and_render();
+                        // Run game simulation and rendering.
+                        // This now returns the frame to draw egui on, or an error.
+                        let game_render_result = state.update_and_render();
+
+                        let output_frame = match game_render_result {
+                            Ok(frame) => frame,
+                            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::OutOfMemory) => {
+                                // Surface Lost or OOM: Logged in update_and_render.
+                                // resize() was called internally if Lost.
+                                // We should skip rendering this frame and request redraw.
+                                log::warn!("Skipping frame due to surface error.");
+                                state.window.request_redraw();
+                                return;
+                            }
+                            Err(wgpu::SurfaceError::Timeout | wgpu::SurfaceError::Outdated) => {
+                                // Temporary errors. Log and skip frame, request redraw.
+                                log::warn!("Skipping frame due to surface {:?}", game_render_result.unwrap_err());
+                                state.window.request_redraw();
+                                return;
+                            }
+                        };
+
+                        let output_view = output_frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+                        // Begin egui frame
+                        let raw_input = state.egui_winit_state.take_egui_input(&state.window);
+                        state.egui_ctx.begin_frame(raw_input);
+
+                        // --- Define the UI ---
+                        // Remove the TopBottomPanel
+                        // egui::TopBottomPanel::top("top_panel").show(&state.egui_ctx, |ui| { ... });
+
+                        // Use an Area for the menu button, positioned top-left
+                        egui::Area::new(egui::Id::new("menu_button_area"))
+                            .anchor(egui::Align2::LEFT_TOP, egui::vec2(5.0, 5.0)) // Anchor top-left, offset slightly
+                            .show(&state.egui_ctx, |ui| {
+                                // Use only the icon, button frame should be transparent by default in an Area
+                                if ui.button("☰").clicked() { // Just the icon
+                                    state.menu_open = !state.menu_open;
+                                }
+                            });
+
+                        if state.menu_open {
+                            egui::SidePanel::left("side_panel")
+                                .resizable(true)
+                                .default_width(200.0)
+                                .show(&state.egui_ctx, |ui| {
+                                ui.heading("Simulation Settings");
+                                ui.separator();
+                                ui.label("Rule Presets:");
+                                if ui.button("Conway's Classic").clicked() {
+                                    // TODO: Implement rule changing based on loaded shaders
+                                    // state.change_rules(GameRules::conway());
+                                    log::info!("Conway button clicked (TODO: load shader)");
+                                }
+                                if ui.button("HighLife").clicked() {
+                                    // TODO: state.change_rules(GameRules::highlife());
+                                    log::info!("HighLife button clicked (TODO: load shader)");
+                                }
+                                if ui.button("Day & Night").clicked() {
+                                    // TODO: state.change_rules(GameRules::day_and_night());
+                                    log::info!("Day & Night button clicked (TODO: load shader)");
+                                }
+                                ui.separator();
+                                ui.label(format!("Zoom: {:.2}", state.zoom));
+                                ui.label(format!("Offset: [{:.1}, {:.1}]", state.view_offset[0], state.view_offset[1]));
+                                ui.label(format!("Grid: {}x{}", state.grid_width, state.grid_height));
+                                ui.label(format!("Frame: {}", state.frame_num));
+
+                                ui.separator();
+                                ui.label("Load Custom Shader Rule:");
+                                if ui.button("Load from file...").clicked() {
+                                    // TODO: Implement file loading logic
+                                    log::info!("Load Shader button clicked (TODO)");
+                                }
+                            });
+                        }
+                        // --- End UI Definition ---
+
+                        // End egui frame
+                        let full_output = state.egui_ctx.end_frame();
+                        let paint_jobs = state.egui_ctx.tessellate(full_output.shapes, state.window.scale_factor() as f32);
+                        let screen_descriptor = egui_wgpu::ScreenDescriptor {
+                            size_in_pixels: [state.config.width, state.config.height],
+                            pixels_per_point: state.window.scale_factor() as f32,
+                        };
+
+                        // Upload egui data to GPU
+                        let mut encoder = state.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("egui Encoder"),
+                        });
+                        for (id, image_delta) in &full_output.textures_delta.set {
+                            state.egui_renderer.update_texture(&state.device, &state.queue, *id, image_delta);
+                        }
+                        let _tdelta = state.egui_renderer.update_buffers(
+                            &state.device,
+                            &state.queue,
+                            &mut encoder,
+                            &paint_jobs,
+                            &screen_descriptor,
+                        );
+                        state.egui_winit_state.handle_platform_output(
+                            &state.window,
+                            full_output.platform_output,
+                        );
+
+                        // Render egui
+                        {
+                            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("egui Render Pass"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view: &output_view, // Render egui ON TOP of the game texture
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Load, // Load the existing game render
+                                        store: wgpu::StoreOp::Store,
+                                    },
+                                })],
+                                depth_stencil_attachment: None,
+                                timestamp_writes: None,
+                                occlusion_query_set: None,
+                            });
+
+                            state.egui_renderer.render(&mut render_pass, &paint_jobs, &screen_descriptor);
+                        }
+
+                        // Free texture delta
+                        for id in &full_output.textures_delta.free {
+                            state.egui_renderer.free_texture(id);
+                        }
+
+                        // Submit egui command buffer
+                        state.queue.submit(Some(encoder.finish()));
+                        output_frame.present(); // Present the final frame with game + egui overlay
+                    }
+                    _ => (),
                 }
-                _ => (),
-            },
+            }
             Event::AboutToWait => {
                 state.window.request_redraw();
             }
