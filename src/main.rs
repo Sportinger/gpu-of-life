@@ -9,15 +9,11 @@ pub mod rules;
 use crate::state::State;
 
 use winit::{
-    dpi::{PhysicalPosition, PhysicalSize},
-    event::{Event, WindowEvent, MouseScrollDelta, MouseButton, ElementState},
+    event::{Event, WindowEvent, MouseScrollDelta},
     event_loop::{ControlFlow, EventLoop},
     window::Window,
 };
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
-use bytemuck::{Pod, Zeroable};
-use std::num::NonZeroU64;
 
 // GUI Imports
 use egui;
@@ -131,7 +127,14 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                             });
 
                         if state.menu_open {
+                            // Define a frame with a semi-transparent background
+                            let panel_frame = egui::Frame {
+                                fill: egui::Color32::from_rgba_unmultiplied(25, 25, 25, 230), // Dark grey, ~90% opaque (adjust alpha 0-255)
+                                ..egui::Frame::side_top_panel(&state.egui_ctx.style())
+                            };
+
                             egui::SidePanel::left("side_panel")
+                                .frame(panel_frame) // Apply the custom frame
                                 .resizable(true)
                                 .default_width(200.0)
                                 .show(&state.egui_ctx, |ui| {
@@ -158,7 +161,18 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                 ui.label(format!("Frame: {}", state.frame_num));
 
                                 ui.separator();
-                                ui.checkbox(&mut state.lucky_rule_enabled, "Enable Lucky Red Cells (10%)");
+                                ui.add(egui::Slider::new(&mut state.brush_radius, 0..=20).text("Brush Radius"));
+                                ui.separator();
+
+                                ui.checkbox(&mut state.lucky_rule_enabled, "Enable Lucky Red Cells");
+                                ui.separator();
+
+                                // Slider for lucky chance percentage (0-100)
+                                // Only has effect if the checkbox above is enabled (checked in shader)
+                                ui.add_enabled(
+                                    state.lucky_rule_enabled, // Only enable slider if rule is enabled
+                                    egui::Slider::new(&mut state.lucky_chance_percent, 0..=100).text("Lucky Chance %")
+                                );
                                 ui.separator();
 
                                 ui.label("Load Custom Shader Rule:");

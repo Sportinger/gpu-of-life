@@ -1,8 +1,12 @@
 struct SimParams {
     width: u32,
     height: u32,
-    seed: u32, // Renamed from frame_counter for clarity
-    enable_lucky_rule: u32, // 0 = false, 1 = true
+    lucky_chance: f32,
+    seed: u32,
+    enable_lucky_rule: u32,
+    _pad1: u32,
+    _pad2: u32,
+    _pad3: u32,
 }
 
 struct GameRules {
@@ -94,7 +98,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
             // Underpopulation or Overpopulation - Cell would normally die.
             // Check if the lucky rule is enabled AND the random chance passes.
-            if (sim_params.enable_lucky_rule == 1u && random_value < 0.1) {
+            if (sim_params.enable_lucky_rule == 1u && random_value < sim_params.lucky_chance) {
                 cell_state_out[idx] = 2.0; // Lucky Red cell!
             } else {
                 cell_state_out[idx] = 0.0; // Cell dies normally

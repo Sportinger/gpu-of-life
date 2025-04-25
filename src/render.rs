@@ -1,7 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 use wgpu;
-use std::num::NonZeroU64;
-use crate::compute::SimParams; // Need SimParams for layout definition
+ // Need SimParams for layout definition
 
 pub const MIN_ZOOM: f32 = 1.0; // Min zoom is 1:1 pixel mapping
 pub const MAX_ZOOM: f32 = 16.0; // Max zoom factor
@@ -27,7 +26,7 @@ pub fn create_render_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroup
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: NonZeroU64::new(std::mem::size_of::<SimParams>() as u64),
+                    min_binding_size: None,
                 },
                 count: None,
             },
@@ -49,7 +48,7 @@ pub fn create_render_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroup
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: NonZeroU64::new(std::mem::size_of::<RenderParams>() as u64),
+                    min_binding_size: None,
                 },
                 count: None,
             },

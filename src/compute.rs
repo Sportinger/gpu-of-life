@@ -1,6 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 use wgpu;
-use std::num::NonZeroU64; // Needed for NonZeroU64
+ // Needed for NonZeroU64
 use crate::rules::GameRules as RustGameRules;
 
 pub const WORKGROUP_SIZE: u32 = 8;
@@ -10,8 +10,10 @@ pub const WORKGROUP_SIZE: u32 = 8;
 pub struct SimParams {
     pub width: u32,
     pub height: u32,
+    pub lucky_chance: f32,      // Moved up
     pub seed: u32,
     pub enable_lucky_rule: u32, // 0 = false, 1 = true
+    pub _padding: [u32; 3],     // Padding still needed (4+4+4 + 4+4 + 12 = 32)
 }
 
 /// Shader-compatible representation of GameRules

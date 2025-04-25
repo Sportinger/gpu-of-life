@@ -3,11 +3,10 @@ use crate::render::{RenderParams, MIN_ZOOM, create_render_bind_group_layout, cre
 use crate::rules::{Pattern, place_pattern_on_grid, GameRules};
 use wgpu::util::DeviceExt;
 use winit::{
-    dpi::{PhysicalPosition, PhysicalSize},
+    dpi::PhysicalPosition,
     window::Window,
 };
 use std::sync::Arc;
-use std::num::NonZeroU64;
 use std::borrow::Cow; // Needed for ShaderSource
 
 // GUI Imports
@@ -15,7 +14,7 @@ use egui_winit::State as EguiWinitState;
 use egui_wgpu::Renderer as EguiWgpuRenderer;
 use egui::Context as EguiContext;
 
-const BRUSH_RADIUS: i32 = 3; // radius in grid cells
+// const BRUSH_RADIUS: i32 = 3; // Remove constant, will use state field
 
 pub struct State {
     pub surface: wgpu::Surface<'static>,
@@ -59,6 +58,8 @@ pub struct State {
     pub egui_renderer: EguiWgpuRenderer,
     pub menu_open: bool,
     pub lucky_rule_enabled: bool,
+    pub brush_radius: u32,
+    pub lucky_chance_percent: u32,
 }
 
 impl State {
@@ -123,8 +124,10 @@ impl State {
         queue.write_buffer(&sim_param_buffer, 0, bytemuck::bytes_of(&SimParams {
             width: initial_grid_width,
             height: initial_grid_height,
+            lucky_chance: 0.1,
             seed: 0,
             enable_lucky_rule: 0,
+            _padding: [0; 3],
         }));
         Self::initialize_grid_buffer(&queue, &grid_buffers[0], initial_grid_width, initial_grid_height);
 
@@ -142,8 +145,45 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // Load initial compute shader source
+        // Load initial compute shader source (will be compiled later)
         let initial_compute_shader_source = include_str!("rules/conway_classic.wgsl").to_string();
+
+        // Define a minimal placeholder compute shader for the initial temporary pipeline.
+        // It MUST define the same structs as the real shader for layout compatibility.
+        let placeholder_compute_shader_source = r#"
+struct SimParams {
+    width: u32,
+    height: u32,
+    lucky_chance: f32,
+    seed: u32,
+    enable_lucky_rule: u32,
+    // _padding: array<u32, 3>,
+    _pad1: u32,
+    _pad2: u32,
+    _pad3: u32,
+}
+
+struct GameRules {
+    survival_min: u32,
+    survival_max: u32,
+    birth_count: u32,
+    _padding: u32,
+}
+
+@group(0) @binding(0) var<uniform> sim_params: SimParams;
+@group(0) @binding(1) var<storage, read> cell_state_in: array<f32>;
+@group(0) @binding(2) var<storage, read_write> cell_state_out: array<f32>;
+@group(0) @binding(3) var<uniform> game_rules: GameRules;
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    // Minimal main function for placeholder - does nothing useful
+    let idx = global_id.x + global_id.y * sim_params.width;
+    if (idx < arrayLength(&cell_state_out)) {
+        cell_state_out[idx] = 0.0; // Just write 0
+    }
+}
+        "#;
 
         // Load render shader (doesn't need dynamic loading for now)
         let render_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -161,7 +201,7 @@ impl State {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: NonZeroU64::new(std::mem::size_of::<SimParams>() as u64),
+                        min_binding_size: None,
                     },
                     count: None,
                 },
@@ -191,7 +231,7 @@ impl State {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: NonZeroU64::new(std::mem::size_of::<ShaderGameRules>() as u64),
+                        min_binding_size: None,
                     },
                     count: None,
                 },
@@ -257,7 +297,8 @@ impl State {
         let temp_compute_pipeline = {
              let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                  label: Some("Temp Initial Compute Shader"),
-                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&initial_compute_shader_source)),
+                 // source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&initial_compute_shader_source)), // Use placeholder instead
+                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(placeholder_compute_shader_source)),
              });
              device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                  label: Some("Temp Initial Compute Pipeline"),
@@ -304,6 +345,8 @@ impl State {
             egui_renderer,
             menu_open: false,
             lucky_rule_enabled: false,
+            brush_radius: 3,
+            lucky_chance_percent: 10,
         };
 
         // Now compile the *real* initial pipeline
@@ -416,8 +459,10 @@ impl State {
             self.queue.write_buffer(&self.sim_param_buffer, 0, bytemuck::bytes_of(&SimParams {
                 width: self.grid_width,
                 height: self.grid_height,
+                lucky_chance: self.lucky_chance_percent as f32 / 100.0,
                 seed: self.frame_num as u32,
                 enable_lucky_rule: if self.lucky_rule_enabled { 1 } else { 0 },
+                _padding: [0; 3],
             }));
 
             // Re-initialize buffer 0 (clears state on resize)
@@ -467,8 +512,10 @@ impl State {
         self.queue.write_buffer(&self.sim_param_buffer, 0, bytemuck::bytes_of(&SimParams {
             width: self.grid_width,
             height: self.grid_height,
+            lucky_chance: self.lucky_chance_percent as f32 / 100.0,
             seed: self.frame_num as u32,
             enable_lucky_rule: if self.lucky_rule_enabled { 1 } else { 0 },
+            _padding: [0; 3],
         }));
 
         // --- Compute Pass ---
@@ -550,8 +597,9 @@ impl State {
             return;
         }
         // Paint a square brush of size (2*R+1)^2
-        for by in -BRUSH_RADIUS..=BRUSH_RADIUS {
-            for bx in -BRUSH_RADIUS..=BRUSH_RADIUS {
+        let radius = self.brush_radius as i32;
+        for by in -radius..=radius {
+            for bx in -radius..=radius {
                 let cx = gx + bx;
                 let cy = gy + by;
                 if cx < 0 || cy < 0 || cx >= self.grid_width as i32 || cy >= self.grid_height as i32 {

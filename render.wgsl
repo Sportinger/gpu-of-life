@@ -1,8 +1,12 @@
 struct SimParams {
     width: u32,
     height: u32,
-    frame_counter: u32,
-    _padding: u32,
+    lucky_chance: f32,
+    seed: u32,              // Match compute shader (was frame_counter)
+    enable_lucky_rule: u32,
+    _pad1: u32,
+    _pad2: u32,
+    _pad3: u32,
 };
 
 struct RenderParams {

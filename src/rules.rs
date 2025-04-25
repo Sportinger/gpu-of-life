@@ -8,8 +8,6 @@ pub mod presets;
 pub mod patterns;
 
 // Re-export contents for easier access
-pub use presets::*;
-pub use patterns::*;
 
 /// Game of Life standard rules:
 /// 1. Any live cell with fewer than two live neighbors dies (underpopulation)
