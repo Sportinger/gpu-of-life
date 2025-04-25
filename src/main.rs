@@ -192,6 +192,23 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                 ui.label(format!("Live Cells: {}",
                                     state.live_cell_count.map_or_else(|| "N/A".to_string(), |count| count.to_string())
                                 ));
+                                // Display current FPS
+                                let fps_text = format!("FPS: {:.1}", state.fps);
+                                let fps_color = if state.fps > 100.0 {
+                                    egui::Color32::GREEN // High FPS (good)
+                                } else if state.fps > 30.0 {
+                                    egui::Color32::YELLOW // Medium FPS (acceptable)
+                                } else {
+                                    egui::Color32::RED // Low FPS (potential issues)
+                                };
+                                ui.colored_label(fps_color, fps_text);
+                                
+                                // Detect if FPS is close to monitor refresh rate (likely vsync limited)
+                                if state.fps > 115.0 && state.fps < 125.0 {
+                                    ui.label("⚠️ FPS appears limited by 120Hz refresh rate");
+                                } else if state.fps > 55.0 && state.fps < 65.0 {
+                                    ui.label("⚠️ FPS appears limited by 60Hz refresh rate");
+                                }
 
                                 ui.separator();
                                 ui.add(egui::Slider::new(&mut state.brush_radius, 0..=20).text("Brush Radius"));
@@ -210,14 +227,18 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
 
                                 // Add simulation speed slider
                                 ui.label("Simulation Speed:");
-                                ui.add(egui::Slider::new(&mut state.simulation_speed, 1..=240)
+                                ui.add(egui::Slider::new(&mut state.simulation_speed, 1..=100_000)
                                     .text("Steps/second")
                                     .logarithmic(true)
                                     .custom_formatter(|val, _| {
                                         if val <= 1.0 {
                                             "1 step/sec".to_string()
-                                        } else if val >= 240.0 {
-                                            "240 steps/sec".to_string()
+                                        } else if val >= 100_000.0 {
+                                            "100K steps/sec".to_string()
+                                        } else if val >= 10_000.0 {
+                                            format!("{:.0}K steps/sec", val / 1000.0)
+                                        } else if val >= 1000.0 {
+                                            format!("{:.1}K steps/sec", val / 1000.0)
                                         } else {
                                             format!("{:.0} steps/sec", val)
                                         }

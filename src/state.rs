@@ -69,6 +69,11 @@ pub struct State {
     pub simulation_speed: u32,           // Steps per second (1-240)
     pub last_update_time: Instant,       // When we last ran a simulation step
     pub accumulated_time: f32,           // Accumulated time for simulation steps
+    // FPS tracking
+    pub frame_times: Vec<f32>,           // Circular buffer of recent frame times in seconds
+    pub frame_time_index: usize,         // Current position in the circular buffer
+    pub last_frame_time: Instant,        // Time of the last rendered frame
+    pub fps: f32,                        // Current calculated FPS
 }
 
 impl State {
@@ -363,6 +368,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             simulation_speed: 60,
             last_update_time: Instant::now(),
             accumulated_time: 0.0,
+            // FPS tracking
+            frame_times: vec![0.0; 60],    // Track last 60 frames (1 second at 60fps)
+            frame_time_index: 0,
+            last_frame_time: Instant::now(),
+            fps: 0.0,
         };
 
         // Now compile the *real* initial pipeline
@@ -524,6 +534,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     /// Run simulation step & render the grid state. Returns the surface texture for egui to draw on.
     pub fn update_and_render(&mut self) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
+        // Update FPS calculation
+        self.update_fps();
+        
         // Update the simulation parameters with the current frame number
         self.queue.write_buffer(&self.sim_param_buffer, 0, bytemuck::bytes_of(&SimParams {
             width: self.grid_width,
@@ -712,6 +725,32 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 // Write to the *input* buffer for the *next* frame's compute pass
                 self.queue.write_buffer(&self.grid_buffers[self.frame_num % 2], idx as u64 * 4, bytemuck::bytes_of(&val));
             }
+        }
+    }
+
+    /// Update FPS calculation with the current frame time
+    pub fn update_fps(&mut self) {
+        let now = Instant::now();
+        let frame_time = now.duration_since(self.last_frame_time).as_secs_f32();
+        self.last_frame_time = now;
+        
+        // Add frame time to the circular buffer
+        self.frame_times[self.frame_time_index] = frame_time;
+        self.frame_time_index = (self.frame_time_index + 1) % self.frame_times.len();
+        
+        // Calculate average frame time from all non-zero entries
+        let mut total_time = 0.0;
+        let mut count = 0;
+        for &time in self.frame_times.iter() {
+            if time > 0.0 {
+                total_time += time;
+                count += 1;
+            }
+        }
+        
+        if count > 0 {
+            let avg_frame_time = total_time / count as f32;
+            self.fps = 1.0 / avg_frame_time; // Convert to frames per second
         }
     }
 } 

@@ -18,10 +18,13 @@ A high-performance cellular automaton simulator powered by GPU compute shaders. 
   - Toggle "Lucky Cell" rule
   - Adjust lucky cell survival chance (0-100%)
   - Adjust brush size
-  - Control simulation speed
+  - Control simulation speed (1-100K steps per second)
+  - Monitor rendering performance with real-time FPS counter
 - **Zoom & Pan**: Navigate across the simulation space
 - **Configurable Rules**: Classic Conway's rules with customization options via GUI and shaders
 - **Lucky Cells**: Configurable chance (default 10%) for dying cells to survive and turn red
+- **Uncapped Performance**: Run simulation at extreme speeds up to 100,000 steps per second
+- **Real-time Monitoring**: Built-in FPS counter to monitor rendering performance
 - **Dynamic Rule System**: Hot-swappable shader rules that can be changed at runtime (TODO: GUI integration)
 - **Modular Architecture**: Clean separation of rule definitions, patterns, and shader logic
 - **API-Ready**: Designed to integrate with external APIs (like AI) for generating new rules
@@ -59,6 +62,8 @@ Built with Rust and WGPU, this simulator leverages your GPU's parallel processin
 - **Compute Shaders**: WGSL code running directly on the GPU
 - **Double Buffering**: Ping-pong buffer technique for cellular simulation
 - **Dynamic Shader Compilation**: Ability to recompile and swap compute shaders at runtime
+- **Uncapped Performance**: Bypasses vsync limitations for maximum simulation speed
+- **Delta Time Simulation**: Time-based simulation updates independent of frame rate
 
 The simulation state is represented as:
 - `0.0`: Dead cell (black)
@@ -96,6 +101,8 @@ cargo run --release
 The GPU implementation allows for real-time simulation of much larger grids than CPU-based approaches:
 
 - Easily handles 1024×1024 grids at 60+ FPS on most modern GPUs
+- Can run simulation at extreme speeds (up to 100,000 steps per second)
+- Built-in FPS counter to monitor rendering performance
 - Brush tool with adjustable size (via GUI) for easy pattern creation
 - Efficient zoom and pan implementation for navigating large simulations
 - Minimal performance impact when hot-swapping rule systems
@@ -105,7 +112,6 @@ The GPU implementation allows for real-time simulation of much larger grids than
 - More patterns and presets
 - Additional cellular automaton rule sets
 - Statistics display (population, generation count)
-- Simulation speed control
 - Save/load functionality
 - **GUI Shader Loading**: Implement "Load from file..." button in menu
 - **GUI Rule Presets**: Connect rule preset buttons in menu to shader loading
