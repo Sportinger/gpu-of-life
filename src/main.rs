@@ -158,6 +158,9 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                 ui.label(format!("Frame: {}", state.frame_num));
 
                                 ui.separator();
+                                ui.checkbox(&mut state.lucky_rule_enabled, "Enable Lucky Red Cells (10%)");
+                                ui.separator();
+
                                 ui.label("Load Custom Shader Rule:");
                                 if ui.button("Load from file...").clicked() {
                                     // TODO: Implement file loading logic

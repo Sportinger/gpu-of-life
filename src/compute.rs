@@ -11,7 +11,7 @@ pub struct SimParams {
     pub width: u32,
     pub height: u32,
     pub seed: u32,
-    pub _pad: u32,
+    pub enable_lucky_rule: u32, // 0 = false, 1 = true
 }
 
 /// Shader-compatible representation of GameRules

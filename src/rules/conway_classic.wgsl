@@ -1,8 +1,8 @@
 struct SimParams {
     width: u32,
     height: u32,
-    frame_counter: u32,  // New frame counter for randomization
-    _padding: u32,       // Padding for 16 byte alignment
+    seed: u32, // Renamed from frame_counter for clarity
+    enable_lucky_rule: u32, // 0 = false, 1 = true
 }
 
 struct GameRules {
@@ -79,9 +79,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let cell = cell_state_in[idx];
     let neighbors = count_neighbors(x, y);
     
-    // Generate a value based on position and frame counter for deterministic randomness
-    let seed = x + y * sim_params.width + sim_params.frame_counter;
-    let random_value = hash(seed);
+    // Generate a value based on position and frame counter (now seed) for deterministic randomness
+    let random_seed = x + y * sim_params.width + sim_params.seed;
+    let random_value = hash(random_seed);
     
     // Find out if the cell is alive (either normal or red)
     let is_alive = cell > 0.5;
@@ -90,14 +90,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (is_alive) {
         // Survival rules
         if (neighbors >= game_rules.survival_min && neighbors <= game_rules.survival_max) {
-            // Maintain the cell's current value (normal or red)
             cell_state_out[idx] = cell;
         } else {
-            // Cell would die, but it has a 10% chance to become red instead
-            if (random_value < 0.1) {
-                cell_state_out[idx] = 2.0; // Red cell
+            // Underpopulation or Overpopulation - Cell would normally die.
+            // Check if the lucky rule is enabled AND the random chance passes.
+            if (sim_params.enable_lucky_rule == 1u && random_value < 0.1) {
+                cell_state_out[idx] = 2.0; // Lucky Red cell!
             } else {
-                cell_state_out[idx] = 0.0; // Cell dies
+                cell_state_out[idx] = 0.0; // Cell dies normally
             }
         }
     } else { // Cell is dead

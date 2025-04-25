@@ -58,6 +58,7 @@ pub struct State {
     pub egui_winit_state: EguiWinitState,
     pub egui_renderer: EguiWgpuRenderer,
     pub menu_open: bool,
+    pub lucky_rule_enabled: bool,
 }
 
 impl State {
@@ -123,7 +124,7 @@ impl State {
             width: initial_grid_width,
             height: initial_grid_height,
             seed: 0,
-            _pad: 0
+            enable_lucky_rule: 0,
         }));
         Self::initialize_grid_buffer(&queue, &grid_buffers[0], initial_grid_width, initial_grid_height);
 
@@ -302,6 +303,7 @@ impl State {
             egui_winit_state,
             egui_renderer,
             menu_open: false,
+            lucky_rule_enabled: false,
         };
 
         // Now compile the *real* initial pipeline
@@ -415,7 +417,7 @@ impl State {
                 width: self.grid_width,
                 height: self.grid_height,
                 seed: self.frame_num as u32,
-                _pad: 0,
+                enable_lucky_rule: if self.lucky_rule_enabled { 1 } else { 0 },
             }));
 
             // Re-initialize buffer 0 (clears state on resize)
@@ -466,7 +468,7 @@ impl State {
             width: self.grid_width,
             height: self.grid_height,
             seed: self.frame_num as u32,
-            _pad: 0,
+            enable_lucky_rule: if self.lucky_rule_enabled { 1 } else { 0 },
         }));
 
         // --- Compute Pass ---
