@@ -10,6 +10,8 @@ pub const WORKGROUP_SIZE: u32 = 8;
 pub struct SimParams {
     pub width: u32,
     pub height: u32,
+    pub seed: u32,
+    pub _pad: u32,
 }
 
 /// Shader-compatible representation of GameRules

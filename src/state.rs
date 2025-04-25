@@ -103,7 +103,12 @@ impl State {
         // Create Grid Resources
         let (grid_buffers, sim_param_buffer) =
             Self::create_grid_buffers(&device, initial_grid_width, initial_grid_height);
-        queue.write_buffer(&sim_param_buffer, 0, bytemuck::bytes_of(&SimParams { width: initial_grid_width, height: initial_grid_height }));
+        queue.write_buffer(&sim_param_buffer, 0, bytemuck::bytes_of(&SimParams { 
+            width: initial_grid_width, 
+            height: initial_grid_height,
+            seed: 0,
+            _pad: 0
+        }));
         Self::initialize_grid_buffer(&queue, &grid_buffers[0], initial_grid_width, initial_grid_height);
 
         // Create Render Resources
@@ -328,6 +333,8 @@ impl State {
             self.queue.write_buffer(&self.sim_param_buffer, 0, bytemuck::bytes_of(&SimParams {
                 width: self.grid_width,
                 height: self.grid_height,
+                seed: self.frame_num as u32,
+                _pad: 0,
             }));
 
             // Re-initialize buffer 0 (clears state on resize)
@@ -369,6 +376,14 @@ impl State {
     }
 
     pub fn update_and_render(&mut self) {
+        // Update the simulation parameters with the current frame number
+        self.queue.write_buffer(&self.sim_param_buffer, 0, bytemuck::bytes_of(&SimParams {
+            width: self.grid_width,
+            height: self.grid_height,
+            seed: self.frame_num as u32,
+            _pad: 0,
+        }));
+        
         // --- Compute Pass ---
         let mut compute_encoder = self.device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Compute Encoder") });
@@ -456,5 +471,19 @@ impl State {
                 self.queue.write_buffer(&self.grid_buffers[self.frame_num % 2], idx as u64 * 4, bytemuck::bytes_of(&val));
             }
         }
+    }
+
+    pub fn resize_grid(&mut self, new_width: u32, new_height: u32) {
+        // Create new grid buffers with the new size
+        let (new_grid_buffers, new_sim_param_buffer) = 
+            Self::create_grid_buffers(&self.device, new_width, new_height);
+        
+        // Initialize with zeros
+        self.queue.write_buffer(&new_sim_param_buffer, 0, bytemuck::bytes_of(&SimParams { 
+            width: new_width, 
+            height: new_height,
+            seed: self.frame_num as u32,
+            _pad: 0
+        }));
     }
 } 
