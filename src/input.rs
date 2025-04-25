@@ -69,9 +69,12 @@ pub fn handle_mouse_input(state: &mut State, button: MouseButton, element_state:
             // Released right mouse button
             if state.is_right_mouse_pressed && !state.right_drag_started && state.cursor_pos.is_some() {
                 // This was a click (not a drag)
-                state.show_context_menu = true;
-                state.context_menu_pos = state.cursor_pos;
-                log::info!("Context menu triggered at {:?}", state.context_menu_pos);
+                // Only trigger context menu if not already showing one
+                if !state.show_context_menu && !state.show_submenu {
+                    state.show_context_menu = true;
+                    state.context_menu_pos = state.cursor_pos;
+                    log::info!("Context menu triggered at {:?}", state.context_menu_pos);
+                }
             }
             
             state.is_right_mouse_pressed = false;
@@ -80,9 +83,10 @@ pub fn handle_mouse_input(state: &mut State, button: MouseButton, element_state:
     } else if button == MouseButton::Left {
         state.is_left_mouse_pressed = element_state == ElementState::Pressed;
         
-        // Dismiss context menu on left click
+        // Dismiss menus on left click (unless clicked inside the menu)
         if state.is_left_mouse_pressed {
-            state.show_context_menu = false;
+            // Let the UI system handle this via the clicked() handlers
+            // Menus will be closed when options are selected
         }
     }
 }

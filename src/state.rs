@@ -75,6 +75,9 @@ pub struct State {
     pub show_context_menu: bool,
     pub context_menu_pos: Option<PhysicalPosition<f64>>,
     pub cursor_mode: CursorMode,
+    pub show_submenu: bool,
+    pub submenu_parent: Option<String>,  // Identifies which option the submenu is for
+    pub submenu_pos: Option<PhysicalPosition<f64>>,
 
     // GUI state
     pub egui_ctx: EguiContext,
@@ -401,6 +404,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             show_context_menu: false,
             context_menu_pos: None,
             cursor_mode: CursorMode::default(),
+            show_submenu: false,
+            submenu_parent: None,
+            submenu_pos: None,
         };
 
         // Now compile the *real* initial pipeline
@@ -575,50 +581,75 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             _padding: [0; 3],
         }));
 
-        // Only run compute pass if it's time for a simulation update
+        // Calculate how many simulation steps to run this frame
         let current_time = Instant::now();
         let elapsed_time = current_time.duration_since(self.last_update_time);
         self.accumulated_time += elapsed_time.as_secs_f32();
         self.last_update_time = current_time;
         
-        // Run simulation steps based on accumulated time
-        while self.accumulated_time >= 1.0 / self.simulation_speed as f32 {
-            self.accumulated_time -= 1.0 / self.simulation_speed as f32;
+        // Determine number of steps to simulate
+        let time_per_step = 1.0 / self.simulation_speed as f32;
+        let mut steps_to_run = 0;
+        
+        // Count how many steps we need to run
+        while self.accumulated_time >= time_per_step {
+            self.accumulated_time -= time_per_step;
+            steps_to_run += 1;
             
-            // --- Compute Pass ---
-            let mut compute_encoder = self.device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Compute Encoder") });
-            {
-                let mut compute_pass = compute_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Game of Life Compute Pass"),
-                    timestamp_writes: None,
-                });
-                compute_pass.set_pipeline(&self.compute_pipeline); // Use the current pipeline
-                compute_pass.set_bind_group(0, &self.compute_bind_groups[self.frame_num % 2], &[]);
-                let dispatch_x = (self.grid_width + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-                let dispatch_y = (self.grid_height + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-                compute_pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+            // Limit maximum steps per frame to prevent freezing on big time jumps
+            if steps_to_run >= 100 {
+                self.accumulated_time = 0.0; // Reset to avoid huge backlog
+                break;
             }
-            self.queue.submit(Some(compute_encoder.finish()));
+        }
+        
+        if steps_to_run > 0 {
+            // Create a single command encoder for all steps
+            let mut compute_encoder = self.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { 
+                    label: Some("Batched Compute Encoder") 
+                });
             
-            // Only increment frame_num when simulation actually runs
-            self.frame_num += 1;
+            // Run multiple simulation steps with the same encoder
+            for _ in 0..steps_to_run {
+                // Track which buffer is input vs output
+                let input_idx = self.frame_num % 2;
+                let output_idx = (self.frame_num + 1) % 2;
+                
+                {
+                    let mut compute_pass = compute_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("Game of Life Compute Pass"),
+                        timestamp_writes: None,
+                    });
+                    compute_pass.set_pipeline(&self.compute_pipeline);
+                    compute_pass.set_bind_group(0, &self.compute_bind_groups[input_idx], &[]);
+                    
+                    let dispatch_x = (self.grid_width + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                    let dispatch_y = (self.grid_height + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+                    compute_pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+                }
+                
+                self.frame_num += 1;
+            }
+            
+            // Submit all simulation steps at once
+            self.queue.submit(Some(compute_encoder.finish()));
         }
 
         // --- Get Surface Texture (early exit on error) ---
         let output_frame = match self.surface.get_current_texture() {
-             Ok(frame) => frame,
-             Err(wgpu::SurfaceError::Lost) => {
-                 log::warn!("Surface lost, recreating...");
-                 self.resize(self.size); // Reconfigure the surface
-                 // Return the error, the caller (main loop) should handle skipping the frame
-                 return Err(wgpu::SurfaceError::Lost);
-             }
-             Err(e) => {
-                 log::error!("Failed to acquire next swap chain texture: {:?}", e);
-                 return Err(e);
-             }
-         };
+            Ok(frame) => frame,
+            Err(wgpu::SurfaceError::Lost) => {
+                log::warn!("Surface lost, recreating...");
+                self.resize(self.size); // Reconfigure the surface
+                // Return the error, the caller (main loop) should handle skipping the frame
+                return Err(wgpu::SurfaceError::Lost);
+            }
+            Err(e) => {
+                log::error!("Failed to acquire next swap chain texture: {:?}", e);
+                return Err(e);
+            }
+        };
 
         // --- Render Pass ---
         let output_view = output_frame
@@ -644,7 +675,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 occlusion_query_set: None,
             });
             render_pass.set_pipeline(&self.render_pipeline);
-             // Use the output of the compute pass (which is frame_num % 2) as input for render pass
+            // Use the output of the compute pass (which is frame_num % 2) as input for render pass
             render_pass.set_bind_group(0, &self.render_bind_groups[(self.frame_num + 1) % 2], &[]);
             render_pass.draw(0..3, 0..1); // Draw full-screen triangle
         }

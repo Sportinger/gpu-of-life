@@ -121,17 +121,18 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                     should_update_count = true;
                                 }
                             }
-                        }
-                        // Reset count if menu closed
-                        // if !state.menu_open {
-                        //     state.live_cell_count = None;
-                        //     state.last_count_update_time = None;
-                        // }
-                        // Perform the potentially blocking update
-                        if should_update_count {
-                            log::info!("Updating live cell count (GPU readback)...");
-                            state.update_live_cell_count();
-                            log::info!("Cell count update finished.");
+                            
+                            // Perform the potentially blocking update
+                            if should_update_count {
+                                log::info!("Updating live cell count (GPU readback)...");
+                                state.update_live_cell_count();
+                                log::info!("Cell count update finished.");
+                            }
+                        } else {
+                            // When menu is closed, don't perform any cell counting
+                            // This avoids expensive GPU readbacks when not needed
+                            state.live_cell_count = None;
+                            state.last_count_update_time = None;
                         }
 
                         // --- Egui Frame and UI Definition ---
@@ -273,6 +274,7 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                 
                                 // Store user actions to perform after UI rendering
                                 let mut new_cursor_mode = None;
+                                let mut show_submenu_for = None;
                                 
                                 egui::Area::new(egui::Id::new("context_menu"))
                                     .movable(false)
@@ -284,31 +286,104 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                             .show(ui, |ui| {
                                                 ui.set_min_width(150.0); // Set minimum width
                                                 
-                                                // Menu options
-                                                if ui.button("Paint Cells (Default)").clicked() {
+                                                // Menu options with right-click handling for submenu
+                                                let paint_response = ui.button("Paint Cells (Default)");
+                                                if paint_response.clicked() { // Left-click
                                                     new_cursor_mode = Some(crate::state::CursorMode::Paint);
                                                 }
+                                                if paint_response.secondary_clicked() { // Right-click
+                                                    show_submenu_for = Some("paint".to_string());
+                                                }
                                                 
-                                                if ui.button("Place Glider").clicked() {
+                                                let glider_response = ui.button("Place Glider");
+                                                if glider_response.clicked() {
                                                     new_cursor_mode = Some(crate::state::CursorMode::PlaceGlider);
                                                 }
-                                                
-                                                if ui.button("Clear Area (15px radius)").clicked() {
-                                                    new_cursor_mode = Some(crate::state::CursorMode::ClearArea);
+                                                if glider_response.secondary_clicked() {
+                                                    show_submenu_for = Some("glider".to_string());
                                                 }
                                                 
-                                                if ui.button("Random Fill (20px radius)").clicked() {
+                                                let clear_response = ui.button("Clear Area (15px radius)");
+                                                if clear_response.clicked() {
+                                                    new_cursor_mode = Some(crate::state::CursorMode::ClearArea);
+                                                }
+                                                if clear_response.secondary_clicked() {
+                                                    show_submenu_for = Some("clear".to_string());
+                                                }
+                                                
+                                                let random_response = ui.button("Random Fill (20px radius)");
+                                                if random_response.clicked() {
                                                     new_cursor_mode = Some(crate::state::CursorMode::RandomFill);
+                                                }
+                                                if random_response.secondary_clicked() {
+                                                    show_submenu_for = Some("random".to_string());
                                                 }
                                             });
                                     });
                                 
-                                // Set the new cursor mode after UI rendering to avoid borrow issues
+                                // Handle cursor mode changes or submenu display
                                 if let Some(mode) = new_cursor_mode {
                                     state.cursor_mode = mode;
                                     state.show_context_menu = false;
+                                    state.show_submenu = false;
                                     log::info!("Cursor mode changed to: {:?}", mode);
+                                } else if let Some(option) = show_submenu_for {
+                                    // Get the position for the submenu (near the parent option)
+                                    state.submenu_parent = Some(option.clone());
+                                    state.show_submenu = true;
+                                    state.submenu_pos = Some(pos);
+                                    log::info!("Showing submenu for: {}", option);
                                 }
+                            }
+                        }
+                        
+                        // Submenu (if shown)
+                        if state.show_submenu {
+                            if let Some(pos) = state.submenu_pos {
+                                // Position the submenu slightly offset from the context menu
+                                let submenu_pos = egui::pos2((pos.x + 150.0) as f32, pos.y as f32);
+                                
+                                egui::Area::new(egui::Id::new("submenu"))
+                                    .movable(false)
+                                    .order(egui::Order::Foreground)
+                                    .fixed_pos(submenu_pos)
+                                    .show(&state.egui_ctx, |ui| {
+                                        // Create a frame for the submenu
+                                        egui::Frame::popup(&state.egui_ctx.style())
+                                            .show(ui, |ui| {
+                                                ui.set_min_width(150.0);
+                                                
+                                                // Display a header showing which option this submenu is for
+                                                if let Some(parent) = &state.submenu_parent {
+                                                    // Capitalize first letter of parent
+                                                    let capitalized = parent.chars().next()
+                                                        .map(|c| c.to_uppercase().collect::<String>())
+                                                        .unwrap_or_default() + &parent[1..];
+                                                    
+                                                    ui.heading(format!("{} Options", capitalized));
+                                                    ui.separator();
+                                                }
+                                                
+                                                // Submenu options (3 dummy options)
+                                                if ui.button("Submenu Option 1").clicked() {
+                                                    log::info!("Submenu option 1 selected");
+                                                    state.show_submenu = false;
+                                                    state.show_context_menu = false;
+                                                }
+                                                
+                                                if ui.button("Submenu Option 2").clicked() {
+                                                    log::info!("Submenu option 2 selected");
+                                                    state.show_submenu = false;
+                                                    state.show_context_menu = false;
+                                                }
+                                                
+                                                if ui.button("Submenu Option 3").clicked() {
+                                                    log::info!("Submenu option 3 selected");
+                                                    state.show_submenu = false;
+                                                    state.show_context_menu = false;
+                                                }
+                                            });
+                                    });
                             }
                         }
 
