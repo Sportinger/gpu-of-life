@@ -69,6 +69,15 @@ pub struct State {
     pub last_mouse_pos: Option<PhysicalPosition<f64>>,
     pub cursor_pos: Option<PhysicalPosition<f64>>, // For zoom centering
 
+    // Drag handling state
+    pub is_dragging: bool,
+    pub drag_start_pos: Option<PhysicalPosition<f64>>,
+    pub last_action_time: Option<std::time::Instant>,
+    pub last_glider_time: Option<std::time::Instant>,
+    pub last_paint_time: Option<std::time::Instant>,
+    pub last_clear_time: Option<std::time::Instant>,
+    pub last_random_time: Option<std::time::Instant>,
+
     // Context menu state
     pub right_click_start_pos: Option<PhysicalPosition<f64>>,
     pub right_drag_started: bool,
@@ -407,6 +416,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             show_submenu: false,
             submenu_parent: None,
             submenu_pos: None,
+            // Drag handling state
+            is_dragging: false,
+            drag_start_pos: None,
+            last_action_time: None,
+            last_glider_time: None,
+            last_paint_time: None,
+            last_clear_time: None,
+            last_random_time: None,
         };
 
         // Now compile the *real* initial pipeline
