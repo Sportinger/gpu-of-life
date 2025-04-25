@@ -1,62 +1,87 @@
 struct SimParams {
     width: u32,
     height: u32,
-};
-
-@group(0) @binding(0) var<uniform> params: SimParams;
-@group(0) @binding(1) var<storage, read> input_grid: array<f32>; // Input buffer
-@group(0) @binding(2) var<storage, read_write> output_grid: array<f32>; // Output buffer
-
-// Function to get cell state from buffer, handling boundary conditions (wrap around)
-fn cell_state(x: i32, y: i32) -> f32 {
-    let width = i32(params.width);
-    let height = i32(params.height);
-    // Wrap coordinates
-    let ix = (x + width) % width;
-    let iy = (y + height) % height;
-    let index = u32(iy * width + ix);
-    // Check bounds just in case, though modulo should handle it
-    if (index >= arrayLength(&input_grid)) {
-        return 0.0; // Or handle error appropriately
-    }
-    return input_grid[index];
 }
 
-@compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let x = i32(global_id.x);
-    let y = i32(global_id.y);
+struct GameRules {
+    survival_min: u32,
+    survival_max: u32,
+    birth_count: u32,
+    _padding: u32, // Ensure 16-byte alignment
+}
 
-    if (global_id.x >= params.width || global_id.y >= params.height) {
-        return;
-    }
+@group(0) @binding(0) var<uniform> sim_params: SimParams;
+@group(0) @binding(1) var<storage, read> cell_state_in: array<f32>;
+@group(0) @binding(2) var<storage, read_write> cell_state_out: array<f32>;
+@group(0) @binding(3) var<uniform> game_rules: GameRules;
 
-    // --- Restore Original GoL Logic --- 
-    var live_neighbors = 0u;
+fn cell_index(x: u32, y: u32) -> u32 {
+    return (y % sim_params.height) * sim_params.width + (x % sim_params.width);
+}
+
+fn count_neighbors(x: u32, y: u32) -> u32 {
+    var count: u32 = 0u;
+    let width = sim_params.width;
+    let height = sim_params.height;
+    
+    // Check all 8 neighbors with wrapping at boundaries
     for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {
         for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {
+            // Skip the cell itself
             if (dx == 0 && dy == 0) {
                 continue;
             }
-            // Use cell_state which handles wrapping
-            if (cell_state(x + dx, y + dy) > 0.5) { 
-                live_neighbors = live_neighbors + 1u;
+            
+            // Calculate wrapped coordinates
+            var nx: u32 = u32(i32(x) + dx);
+            var ny: u32 = u32(i32(y) + dy);
+            
+            // Wrap around grid boundaries
+            if (i32(nx) < 0) { nx = width - 1u; } 
+            else if (nx >= width) { nx = 0u; }
+            
+            if (i32(ny) < 0) { ny = height - 1u; } 
+            else if (ny >= height) { ny = 0u; }
+            
+            let idx = cell_index(nx, ny);
+            if (cell_state_in[idx] > 0.5) {
+                count = count + 1u;
             }
         }
     }
-    let current_state = cell_state(x, y);
-    var next_state = 0.0;
-    if (current_state > 0.5) { // Alive
-        if (live_neighbors == 2u || live_neighbors == 3u) {
-            next_state = 1.0; // Survives
+    
+    return count;
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    // Get current cell position
+    let x = global_id.x;
+    let y = global_id.y;
+    
+    // Bounds check
+    if (x >= sim_params.width || y >= sim_params.height) {
+        return;
+    }
+    
+    let idx = cell_index(x, y);
+    let cell = cell_state_in[idx];
+    let neighbors = count_neighbors(x, y);
+    
+    // Apply Game of Life rules
+    if (cell > 0.5) { // Cell is alive
+        // Survival rules
+        if (neighbors >= game_rules.survival_min && neighbors <= game_rules.survival_max) {
+            cell_state_out[idx] = 1.0;
+        } else {
+            cell_state_out[idx] = 0.0; // Cell dies
         }
-    } else { // Dead
-        if (live_neighbors == 3u) {
-            next_state = 1.0; // Becomes alive
+    } else { // Cell is dead
+        // Birth rules
+        if (neighbors == game_rules.birth_count) {
+            cell_state_out[idx] = 1.0; // Cell becomes alive
+        } else {
+            cell_state_out[idx] = 0.0; // Cell stays dead
         }
     }
-    // --- End Original GoL Logic ---
-
-    let index = global_id.y * params.width + global_id.x;
-    output_grid[index] = next_state;
 } 
