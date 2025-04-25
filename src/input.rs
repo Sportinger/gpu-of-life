@@ -45,6 +45,7 @@ pub fn handle_zoom(state: &mut State, delta: f32) {
 
     state.zoom = new_zoom;
     state.view_offset = new_offset;
+    clamp_offset(state);
 
     log::info!("Zoom: {:.2}, Offset: [{:.1}, {:.1}]", state.zoom, state.view_offset[0], state.view_offset[1]);
 
@@ -62,6 +63,8 @@ pub fn handle_mouse_input(state: &mut State, button: MouseButton, element_state:
         if !is_pressed {
             state.last_mouse_pos = None;
         }
+    } else if button == MouseButton::Left {
+        state.is_left_mouse_pressed = element_state == ElementState::Pressed;
     }
 }
 
@@ -86,12 +89,8 @@ pub fn handle_cursor_move(state: &mut State, position: PhysicalPosition<f64>) {
             // Vertical drag updates y offset (index 1)
             state.view_offset[1] -= dy_grid as f32;
 
-            // Clamp offset (optional, maybe based on grid boundaries if needed)
-            // let max_offset_x = (state.grid_width as f32 * (1.0 - 1.0 / state.zoom)) / 2.0;
-            // let max_offset_y = (state.grid_height as f32 * (1.0 - 1.0 / state.zoom)) / 2.0;
-            // state.view_offset[0] = state.view_offset[0].clamp(-max_offset_x, max_offset_x);
-            // state.view_offset[1] = state.view_offset[1].clamp(-max_offset_y, max_offset_y);
-
+            // Ensure we don't pan outside the grid
+            clamp_offset(state);
 
             state.queue.write_buffer(&state.render_param_buffer, 0, bytemuck::bytes_of(&RenderParams {
                 zoom: state.zoom,
@@ -104,6 +103,11 @@ pub fn handle_cursor_move(state: &mut State, position: PhysicalPosition<f64>) {
     } else {
         state.last_mouse_pos = None;
     }
+
+    // If left button pressed, paint cell every movement step
+    if state.is_left_mouse_pressed {
+        state.paint_cell(position);
+    }
 }
 
 pub fn handle_cursor_left(state: &mut State) {
@@ -111,4 +115,17 @@ pub fn handle_cursor_left(state: &mut State) {
     // Don't reset is_right_mouse_pressed here, only reset last_mouse_pos
     // This allows dragging to continue even if cursor momentarily leaves and re-enters
     state.last_mouse_pos = None;
+}
+
+// Clamp view_offset so the visible area never moves outside the grid
+fn clamp_offset(state: &mut State) {
+    let max_x = (state.grid_width as f32 * state.zoom) - state.size.width as f32;
+    let max_y = (state.grid_height as f32 * state.zoom) - state.size.height as f32;
+
+    // If the grid is smaller than the window along an axis, limit stays 0
+    let max_x = max_x.max(0.0);
+    let max_y = max_y.max(0.0);
+
+    state.view_offset[0] = state.view_offset[0].clamp(0.0, max_x);
+    state.view_offset[1] = state.view_offset[1].clamp(0.0, max_y);
 } 

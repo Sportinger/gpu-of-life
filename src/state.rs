@@ -9,6 +9,8 @@ use winit::{
 use std::sync::Arc;
 use std::num::NonZeroU64;
 
+const BRUSH_RADIUS: i32 = 3; // radius in grid cells
+
 pub struct State {
     pub surface: wgpu::Surface<'static>,
     pub device: wgpu::Device,
@@ -37,6 +39,7 @@ pub struct State {
     pub zoom: f32,
     pub view_offset: [f32; 2], // Current view offset (in grid coordinates)
     pub is_right_mouse_pressed: bool,
+    pub is_left_mouse_pressed: bool,
     pub last_mouse_pos: Option<PhysicalPosition<f64>>,
     pub cursor_pos: Option<PhysicalPosition<f64>>, // For zoom centering
 }
@@ -246,6 +249,7 @@ impl State {
             zoom: initial_zoom,
             view_offset: initial_view_offset,
             is_right_mouse_pressed: false,
+            is_left_mouse_pressed: false,
             last_mouse_pos: None,
             cursor_pos: None,
         }
@@ -427,5 +431,30 @@ impl State {
         output_frame.present();
 
         self.frame_num += 1;
+    }
+
+    pub fn paint_cell(&mut self, screen_pos: PhysicalPosition<f64>) {
+        // Convert screen pos to grid coordinate under current zoom & offset
+        let x_world = ((screen_pos.x as f32) + self.view_offset[0]) / self.zoom;
+        let y_world = ((screen_pos.y as f32) + self.view_offset[1]) / self.zoom;
+
+        let gx = x_world.floor() as i32;
+        let gy = y_world.floor() as i32;
+        if gx < 0 || gy < 0 || gx >= self.grid_width as i32 || gy >= self.grid_height as i32 {
+            return;
+        }
+        // Paint a square brush of size (2*R+1)^2
+        for by in -BRUSH_RADIUS..=BRUSH_RADIUS {
+            for bx in -BRUSH_RADIUS..=BRUSH_RADIUS {
+                let cx = gx + bx;
+                let cy = gy + by;
+                if cx < 0 || cy < 0 || cx >= self.grid_width as i32 || cy >= self.grid_height as i32 {
+                    continue;
+                }
+                let idx = (cy as u32 * self.grid_width + cx as u32) as usize;
+                let val: [f32;1] = [1.0];
+                self.queue.write_buffer(&self.grid_buffers[self.frame_num % 2], idx as u64 * 4, bytemuck::bytes_of(&val));
+            }
+        }
     }
 } 
