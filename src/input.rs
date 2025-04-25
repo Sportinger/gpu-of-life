@@ -79,8 +79,11 @@ pub fn handle_cursor_move(state: &mut State, position: PhysicalPosition<f64>) {
             let dx_grid = dx_screen / state.zoom as f64;
             let dy_grid = dy_screen / state.zoom as f64;
 
-            // Update view offset (negative because we are moving the view, not the grid)
+            // Map mouse movement to view offset in a way that vertical drag pans vertically and horizontal drag pans horizontally.
+            // Horizontal drag updates x offset (index 0)
             state.view_offset[0] -= dx_grid as f32;
+
+            // Vertical drag updates y offset (index 1)
             state.view_offset[1] -= dy_grid as f32;
 
             // Clamp offset (optional, maybe based on grid boundaries if needed)

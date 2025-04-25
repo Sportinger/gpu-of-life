@@ -12,8 +12,8 @@ pub const ZOOM_FACTOR_STEP: f32 = 1.2; // How much each wheel step zooms
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct RenderParams {
     pub zoom: f32,
+    pub _padding: f32,            // 4-byte padding so view_offset is 8-byte aligned
     pub view_offset: [f32; 2],
-    pub _padding: f32, // Ensure 16-byte alignment (f32 + vec2<f32> + f32 = 4 + 8 + 4 = 16)
 }
 
 pub fn create_render_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
