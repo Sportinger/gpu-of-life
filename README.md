@@ -2,7 +2,13 @@
 
 A high-performance cellular automaton simulator powered by GPU compute shaders. This implementation of Conway's Game of Life runs entirely on your graphics card for blazing-fast simulation of large grids.
 
-![Game of Life](https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExcjQxM2s4cTRvM3BwdXQxZW41Y3NqcmIzMHVlaGlscnJtbGUyMHJvbCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3og0ILr4ttBPRBjYoE/giphy.gif)
+## 🖼️ Screenshots
+
+### Random patterns with red "lucky" cells that survived death
+![Random patterns with red cells](assets/images/prev1.png)
+
+### Creating shapes by painting with the mouse
+![Drawing patterns with mouse](assets/images/prev2.png)
 
 ## ✨ Features
 
