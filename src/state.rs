@@ -16,6 +16,21 @@ use egui::Context as EguiContext;
 use std::time::Instant;
 use std::time::Duration; // For throttling
 
+// Cursor modes for different tools
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CursorMode {
+    Paint,          // Default - paint cells
+    PlaceGlider,    // Place gliders
+    ClearArea,      // Clear cells in an area
+    RandomFill,     // Fill with random cells
+}
+
+impl Default for CursorMode {
+    fn default() -> Self {
+        Self::Paint
+    }
+}
+
 // const BRUSH_RADIUS: i32 = 3; // Remove constant, will use state field
 
 pub struct State {
@@ -53,6 +68,13 @@ pub struct State {
     pub is_left_mouse_pressed: bool,
     pub last_mouse_pos: Option<PhysicalPosition<f64>>,
     pub cursor_pos: Option<PhysicalPosition<f64>>, // For zoom centering
+
+    // Context menu state
+    pub right_click_start_pos: Option<PhysicalPosition<f64>>,
+    pub right_drag_started: bool,
+    pub show_context_menu: bool,
+    pub context_menu_pos: Option<PhysicalPosition<f64>>,
+    pub cursor_mode: CursorMode,
 
     // GUI state
     pub egui_ctx: EguiContext,
@@ -373,6 +395,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             frame_time_index: 0,
             last_frame_time: Instant::now(),
             fps: 0.0,
+            // Context menu state
+            right_click_start_pos: None,
+            right_drag_started: false,
+            show_context_menu: false,
+            context_menu_pos: None,
+            cursor_mode: CursorMode::default(),
         };
 
         // Now compile the *real* initial pipeline
@@ -752,5 +780,117 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let avg_frame_time = total_time / count as f32;
             self.fps = 1.0 / avg_frame_time; // Convert to frames per second
         }
+    }
+
+    /// Convert a screen position to grid coordinates
+    pub fn screen_to_grid(&self, screen_pos: PhysicalPosition<f64>) -> (i32, i32) {
+        let x_world = ((screen_pos.x as f32) + self.view_offset[0]) / self.zoom;
+        let y_world = ((screen_pos.y as f32) + self.view_offset[1]) / self.zoom;
+
+        (x_world.floor() as i32, y_world.floor() as i32)
+    }
+    
+    /// Place a glider at the specified screen position
+    pub fn place_glider(&mut self, screen_pos: PhysicalPosition<f64>) {
+        let (gx, gy) = self.screen_to_grid(screen_pos);
+        
+        // Skip if out of bounds
+        if gx < 0 || gy < 0 || gx >= self.grid_width as i32 || gy >= self.grid_height as i32 {
+            return;
+        }
+        
+        // Glider pattern cells relative to center
+        let glider_cells = [
+            (0, 1),
+            (1, 2),
+            (2, 0), (2, 1), (2, 2)
+        ];
+        
+        // Place the glider cells
+        for (dx, dy) in &glider_cells {
+            let cx = gx + dx;
+            let cy = gy + dy;
+            
+            if cx < 0 || cy < 0 || cx >= self.grid_width as i32 || cy >= self.grid_height as i32 {
+                continue; // Skip out of bounds cells
+            }
+            
+            let idx = (cy as u32 * self.grid_width + cx as u32) as usize;
+            let val: [f32;1] = [1.0];
+            // Write to the *input* buffer for the *next* frame's compute pass
+            self.queue.write_buffer(&self.grid_buffers[self.frame_num % 2], idx as u64 * 4, bytemuck::bytes_of(&val));
+        }
+        
+        log::info!("Placed glider at grid position ({}, {})", gx, gy);
+    }
+    
+    /// Clear an area around the specified screen position
+    pub fn clear_area(&mut self, screen_pos: PhysicalPosition<f64>, radius: u32) {
+        let (gx, gy) = self.screen_to_grid(screen_pos);
+        let radius = radius as i32;
+        
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                // Skip if distance is greater than radius (circular area)
+                if dx*dx + dy*dy > radius*radius {
+                    continue;
+                }
+                
+                let cx = gx + dx;
+                let cy = gy + dy;
+                
+                if cx < 0 || cy < 0 || cx >= self.grid_width as i32 || cy >= self.grid_height as i32 {
+                    continue; // Skip out of bounds cells
+                }
+                
+                let idx = (cy as u32 * self.grid_width + cx as u32) as usize;
+                let val: [f32;1] = [0.0]; // Set to dead (0.0)
+                self.queue.write_buffer(&self.grid_buffers[self.frame_num % 2], idx as u64 * 4, bytemuck::bytes_of(&val));
+            }
+        }
+        
+        log::info!("Cleared area with radius {} at grid position ({}, {})", radius, gx, gy);
+    }
+    
+    /// Fill an area with random cells around the specified screen position
+    pub fn random_fill(&mut self, screen_pos: PhysicalPosition<f64>, radius: u32, density: f32) {
+        let (gx, gy) = self.screen_to_grid(screen_pos);
+        let radius = radius as i32;
+        
+        // Use frame_num as a kind of seed for randomization
+        let seed = self.frame_num as u32;
+        
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                // Skip if distance is greater than radius (circular area)
+                if dx*dx + dy*dy > radius*radius {
+                    continue;
+                }
+                
+                let cx = gx + dx;
+                let cy = gy + dy;
+                
+                if cx < 0 || cy < 0 || cx >= self.grid_width as i32 || cy >= self.grid_height as i32 {
+                    continue; // Skip out of bounds cells
+                }
+                
+                // Simple deterministic random function based on coordinates and seed
+                let random_val = {
+                    let h1 = (cx as u32).wrapping_mul(17).wrapping_add((cy as u32).wrapping_mul(31));
+                    let h2 = h1.wrapping_add(seed.wrapping_mul(43));
+                    (h2 % 1000) as f32 / 1000.0
+                };
+                
+                // Only fill some cells based on density
+                if random_val < density {
+                    let idx = (cy as u32 * self.grid_width + cx as u32) as usize;
+                    let val: [f32;1] = [1.0]; // Set to alive (1.0)
+                    self.queue.write_buffer(&self.grid_buffers[self.frame_num % 2], idx as u64 * 4, bytemuck::bytes_of(&val));
+                }
+            }
+        }
+        
+        log::info!("Randomly filled area with radius {} and density {} at grid position ({}, {})", 
+                  radius, density, gx, gy);
     }
 } 

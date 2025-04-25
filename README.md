@@ -20,11 +20,14 @@ A high-performance cellular automaton simulator powered by GPU compute shaders. 
   - Adjust brush size
   - Control simulation speed (1-100K steps per second)
   - Monitor rendering performance with real-time FPS counter
+  - Set 1:1 pixel mapping (one screen pixel = one cell)
 - **Zoom & Pan**: Navigate across the simulation space
 - **Configurable Rules**: Classic Conway's rules with customization options via GUI and shaders
 - **Lucky Cells**: Configurable chance (default 10%) for dying cells to survive and turn red
 - **Uncapped Performance**: Run simulation at extreme speeds up to 100,000 steps per second
 - **Real-time Monitoring**: Built-in FPS counter to monitor rendering performance
+- **Massive Grid Size**: Automatically scales to window size (millions of cells on high-resolution displays)
+- **1:1 Pixel Mapping**: Option to display each cell as exactly one screen pixel
 - **Dynamic Rule System**: Hot-swappable shader rules that can be changed at runtime (TODO: GUI integration)
 - **Modular Architecture**: Clean separation of rule definitions, patterns, and shader logic
 - **API-Ready**: Designed to integrate with external APIs (like AI) for generating new rules

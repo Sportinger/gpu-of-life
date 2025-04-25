@@ -20,8 +20,8 @@ use egui;
 use std::time::{Instant, Duration}; // Import time types
 
 // Constants
-const GRID_WIDTH: u32 = 256;
-const GRID_HEIGHT: u32 = 256;
+const GRID_WIDTH: u32 = 1024;
+const GRID_HEIGHT: u32 = 1024;
 
 async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
     let mut state = State::new(window).await;
@@ -158,7 +158,7 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                         if state.menu_open {
                             // Define a frame with a semi-transparent background
                             let panel_frame = egui::Frame {
-                                fill: egui::Color32::from_rgba_unmultiplied(25, 25, 25, 100), // Dark grey, ~40% opaque
+                                fill: egui::Color32::from_rgba_unmultiplied(25, 25, 25, 128), // Dark grey, 50% opaque
                                 ..egui::Frame::side_top_panel(&state.egui_ctx.style())
                             };
 
@@ -169,23 +169,41 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                 .show(&state.egui_ctx, |ui| {
                                 ui.heading("Simulation Settings");
                                 ui.separator();
-                                ui.label("Rule Presets:");
-                                if ui.button("Conway's Classic").clicked() {
-                                    // TODO: Implement rule changing based on loaded shaders
-                                    // state.change_rules(GameRules::conway());
-                                    log::info!("Conway button clicked (TODO: load shader)");
-                                }
-                                if ui.button("HighLife").clicked() {
-                                    // TODO: state.change_rules(GameRules::highlife());
-                                    log::info!("HighLife button clicked (TODO: load shader)");
-                                }
-                                if ui.button("Day & Night").clicked() {
-                                    // TODO: state.change_rules(GameRules::day_and_night());
-                                    log::info!("Day & Night button clicked (TODO: load shader)");
-                                }
-                                ui.separator();
+                                
                                 ui.label(format!("Zoom: {:.2}", state.zoom));
                                 ui.label(format!("Offset: [{:.1}, {:.1}]", state.view_offset[0], state.view_offset[1]));
+                                
+                                // Add button for setting zoom to 1:1 pixel mapping
+                                let already_at_min_zoom = (state.zoom - crate::render::MIN_ZOOM).abs() < 0.01;
+                                if ui.add_enabled(!already_at_min_zoom, egui::Button::new("Reset to 1:1 Pixel Mapping")).clicked() {
+                                    // Set zoom directly
+                                    let old_zoom = state.zoom;
+                                    state.zoom = crate::render::MIN_ZOOM;
+                                    
+                                    // Adjust view offset to keep center point
+                                    let center_x = state.size.width as f32 / 2.0;
+                                    let center_y = state.size.height as f32 / 2.0;
+                                    
+                                    // Calculate world coordinate at center before zoom
+                                    let world_x = (center_x + state.view_offset[0]) / old_zoom;
+                                    let world_y = (center_y + state.view_offset[1]) / old_zoom;
+                                    
+                                    // Calculate offset after zoom
+                                    state.view_offset[0] = world_x * state.zoom - center_x;
+                                    state.view_offset[1] = world_y * state.zoom - center_y;
+                                    
+                                    // Update GPU buffer
+                                    state.queue.write_buffer(&state.render_param_buffer, 0, bytemuck::bytes_of(&crate::render::RenderParams {
+                                        zoom: state.zoom,
+                                        view_offset: state.view_offset,
+                                        _padding: 0.0,
+                                    }));
+                                }
+                                
+                                if already_at_min_zoom {
+                                    ui.label("Already at 1:1 pixel mapping (one pixel = one cell)");
+                                }
+                                
                                 ui.label(format!("Grid: {}x{}", state.grid_width, state.grid_height));
                                 ui.label(format!("Frame: {}", state.frame_num));
                                 // Display live cell count
@@ -243,20 +261,96 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                             format!("{:.0} steps/sec", val)
                                         }
                                     }));
-                                ui.separator();
-
-                                ui.label("Load Custom Shader Rule:");
-                                if ui.button("Load from file...").clicked() {
-                                    // TODO: Implement file loading logic
-                                    log::info!("Load Shader button clicked (TODO)");
-                                }
                             });
                         }
                         // --- End UI Definition ---
 
+                        // Context menu (if shown)
+                        if state.show_context_menu {
+                            if let Some(pos) = state.context_menu_pos {
+                                // Convert position to egui coordinates
+                                let screen_pos = egui::pos2(pos.x as f32, pos.y as f32);
+                                
+                                // Store user actions to perform after UI rendering
+                                let mut new_cursor_mode = None;
+                                
+                                egui::Area::new(egui::Id::new("context_menu"))
+                                    .movable(false)
+                                    .order(egui::Order::Foreground)
+                                    .fixed_pos(screen_pos)
+                                    .show(&state.egui_ctx, |ui| {
+                                        // Create a frame for the context menu
+                                        egui::Frame::popup(&state.egui_ctx.style())
+                                            .show(ui, |ui| {
+                                                ui.set_min_width(150.0); // Set minimum width
+                                                
+                                                // Menu options
+                                                if ui.button("Paint Cells (Default)").clicked() {
+                                                    new_cursor_mode = Some(crate::state::CursorMode::Paint);
+                                                }
+                                                
+                                                if ui.button("Place Glider").clicked() {
+                                                    new_cursor_mode = Some(crate::state::CursorMode::PlaceGlider);
+                                                }
+                                                
+                                                if ui.button("Clear Area (15px radius)").clicked() {
+                                                    new_cursor_mode = Some(crate::state::CursorMode::ClearArea);
+                                                }
+                                                
+                                                if ui.button("Random Fill (20px radius)").clicked() {
+                                                    new_cursor_mode = Some(crate::state::CursorMode::RandomFill);
+                                                }
+                                            });
+                                    });
+                                
+                                // Set the new cursor mode after UI rendering to avoid borrow issues
+                                if let Some(mode) = new_cursor_mode {
+                                    state.cursor_mode = mode;
+                                    state.show_context_menu = false;
+                                    log::info!("Cursor mode changed to: {:?}", mode);
+                                }
+                            }
+                        }
+
+                        // Cursor Mode Indicator
+                        if let Some(cursor_pos) = state.cursor_pos {
+                            use crate::state::CursorMode;
+                            
+                            // Don't show cursor indicator when context menu is open
+                            if !state.show_context_menu {
+                                let cursor_screen_pos = egui::pos2(cursor_pos.x as f32, cursor_pos.y as f32);
+                                
+                                egui::Area::new(egui::Id::new("cursor_indicator"))
+                                    .movable(false)
+                                    .order(egui::Order::Foreground)
+                                    .fixed_pos(cursor_screen_pos + egui::vec2(15.0, 15.0)) // Offset from actual cursor
+                                    .show(&state.egui_ctx, |ui| {
+                                        // Different indicators based on mode
+                                        match state.cursor_mode {
+                                            CursorMode::Paint => {
+                                                // Default mode, no special indicator
+                                            },
+                                            CursorMode::PlaceGlider => {
+                                                ui.label(egui::RichText::new("🚀 Glider").color(egui::Color32::WHITE)
+                                                    .background_color(egui::Color32::from_rgba_premultiplied(0, 0, 0, 200)));
+                                            },
+                                            CursorMode::ClearArea => {
+                                                ui.label(egui::RichText::new("🧹 Clear").color(egui::Color32::WHITE)
+                                                    .background_color(egui::Color32::from_rgba_premultiplied(0, 0, 0, 200)));
+                                            },
+                                            CursorMode::RandomFill => {
+                                                ui.label(egui::RichText::new("🎲 Random").color(egui::Color32::WHITE)
+                                                    .background_color(egui::Color32::from_rgba_premultiplied(0, 0, 0, 200)));
+                                            },
+                                        }
+                                    });
+                            }
+                        }
+
                         // End egui frame
                         let full_output = state.egui_ctx.end_frame();
                         let paint_jobs = state.egui_ctx.tessellate(full_output.shapes, state.window.scale_factor() as f32);
+                        
                         let screen_descriptor = egui_wgpu::ScreenDescriptor {
                             size_in_pixels: [state.config.width, state.config.height],
                             pixels_per_point: state.window.scale_factor() as f32,
