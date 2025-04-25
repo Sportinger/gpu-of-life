@@ -8,6 +8,7 @@ use winit::{
 };
 use std::sync::Arc;
 use std::num::NonZeroU64;
+use std::borrow::Cow; // Needed for ShaderSource
 
 const BRUSH_RADIUS: i32 = 3; // radius in grid cells
 
@@ -23,12 +24,16 @@ pub struct State {
     pub grid_height: u32,
     pub grid_buffers: [wgpu::Buffer; 2],
     pub sim_param_buffer: wgpu::Buffer,
-    pub rules_buffer: wgpu::Buffer,  // NEW: buffer for game rules
-    pub current_rules: GameRules,    // NEW: current rules state
+    pub rules_buffer: wgpu::Buffer,
+    pub current_rules: GameRules,
 
-    pub compute_pipeline: wgpu::ComputePipeline,
+    // --- Compute related fields ---
+    pub compute_shader_source: String, // Store the source code
     pub compute_bind_group_layout: wgpu::BindGroupLayout,
+    pub compute_pipeline_layout: wgpu::PipelineLayout, // Store the layout
+    pub compute_pipeline: wgpu::ComputePipeline, // The current pipeline
     pub compute_bind_groups: [wgpu::BindGroup; 2],
+    // --- End Compute ---
 
     pub render_pipeline: wgpu::RenderPipeline,
     pub render_bind_group_layout: wgpu::BindGroupLayout,
@@ -103,8 +108,8 @@ impl State {
         // Create Grid Resources
         let (grid_buffers, sim_param_buffer) =
             Self::create_grid_buffers(&device, initial_grid_width, initial_grid_height);
-        queue.write_buffer(&sim_param_buffer, 0, bytemuck::bytes_of(&SimParams { 
-            width: initial_grid_width, 
+        queue.write_buffer(&sim_param_buffer, 0, bytemuck::bytes_of(&SimParams {
+            width: initial_grid_width,
             height: initial_grid_height,
             seed: 0,
             _pad: 0
@@ -125,17 +130,16 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // Load shaders
-        let compute_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Compute Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../compute.wgsl").into()),
-        });
+        // Load initial compute shader source
+        let initial_compute_shader_source = include_str!("rules/conway_classic.wgsl").to_string();
+
+        // Load render shader (doesn't need dynamic loading for now)
         let render_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Render Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../render.wgsl").into()),
         });
 
-        // Compute Pipeline
+        // --- Setup Compute Pipeline ---
         let compute_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Compute Bind Group Layout"),
             entries: &[
@@ -181,20 +185,20 @@ impl State {
                 },
             ],
         });
+
         let compute_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Compute Pipeline Layout"),
             bind_group_layouts: &[&compute_bind_group_layout],
             push_constant_ranges: &[],
         });
-        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Compute Pipeline"),
-            layout: Some(&compute_pipeline_layout),
-            module: &compute_shader_module,
-            entry_point: "main",
-        });
+
+        // Initial pipeline creation will happen via recreate_compute_pipeline
+
         let compute_bind_groups = create_compute_bind_groups(
             &device, &compute_bind_group_layout, &grid_buffers, &sim_param_buffer, &rules_buffer
         );
+        // --- End Compute Pipeline Setup ---
+
 
         // Render Pipeline
         let render_bind_group_layout = create_render_bind_group_layout(&device);
@@ -230,7 +234,23 @@ impl State {
 
         log::info!("wgpu initialized successfully.");
 
-        Self {
+        // Temporary compute pipeline before the real one is compiled
+        // This is slightly awkward but necessary because recreate_compute_pipeline needs `&mut self`
+        let temp_compute_pipeline = {
+             let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                 label: Some("Temp Initial Compute Shader"),
+                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&initial_compute_shader_source)),
+             });
+             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                 label: Some("Temp Initial Compute Pipeline"),
+                 layout: Some(&compute_pipeline_layout),
+                 module: &module,
+                 entry_point: "main",
+             })
+        };
+
+
+        let mut state = Self {
             surface,
             device,
             queue,
@@ -243,9 +263,13 @@ impl State {
             sim_param_buffer,
             rules_buffer,
             current_rules: game_rules,
-            compute_pipeline,
+
+            compute_shader_source: initial_compute_shader_source, // Store source
             compute_bind_group_layout,
+            compute_pipeline_layout, // Store layout
+            compute_pipeline: temp_compute_pipeline, // Store pipeline (will be replaced)
             compute_bind_groups,
+
             render_pipeline,
             render_bind_group_layout,
             render_bind_groups,
@@ -257,7 +281,43 @@ impl State {
             is_left_mouse_pressed: false,
             last_mouse_pos: None,
             cursor_pos: None,
-        }
+        };
+
+        // Now compile the *real* initial pipeline
+        state.recreate_compute_pipeline_from_source()
+             .expect("Failed to compile initial compute shader");
+
+        state
+    }
+
+    /// Compiles the WGSL source stored in `self.compute_shader_source` and
+    /// replaces `self.compute_pipeline`.
+    fn recreate_compute_pipeline_from_source(&mut self) -> Result<(), String> {
+        log::info!("Compiling compute shader...");
+        let shader_module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Dynamic Compute Shader"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&self.compute_shader_source)),
+        });
+
+        // Note: Shader compilation errors are not directly exposed in a user-friendly way by wgpu's create_shader_module.
+        // Errors might be reported through logs or device loss if severe.
+        // For more robust error handling, WGSL validation libraries (like naga) could be used beforehand.
+
+        self.compute_pipeline = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Dynamic Compute Pipeline"),
+            layout: Some(&self.compute_pipeline_layout), // Use stored layout
+            module: &shader_module,
+            entry_point: "main",
+        });
+        log::info!("Compute shader compiled successfully.");
+        Ok(())
+    }
+
+    /// Loads new WGSL source code, attempts to compile it, and replaces the
+    /// current compute pipeline if successful.
+    pub fn load_new_compute_shader(&mut self, new_shader_source: String) -> Result<(), String> {
+        self.compute_shader_source = new_shader_source;
+        self.recreate_compute_pipeline_from_source() // Attempt recompilation
     }
 
     // Helper function to create grid buffers (kept internal to State)
@@ -294,21 +354,21 @@ impl State {
     fn initialize_grid_buffer(queue: &wgpu::Queue, buffer: &wgpu::Buffer, width: u32, height: u32) {
         let grid_size = (width * height) as usize;
         let mut initial_data = vec![0.0f32; grid_size];
-        
+
         if width > 10 && height > 10 {
             // Place a glider pattern near the center
             let pattern_pos_x = width / 4;
             let pattern_pos_y = height / 4;
-            
+
             // Use the Pattern enum from the rules module
             place_pattern_on_grid(&mut initial_data, width, height, &Pattern::Glider, pattern_pos_x, pattern_pos_y);
-            
+
             // You could add more patterns or different ones based on parameters
             // For example:
             // place_pattern_on_grid(&mut initial_data, width, height, &Pattern::Blinker, width/2, height/2);
             place_pattern_on_grid(&mut initial_data, width, height, &Pattern::GosperGliderGun, width/5, height/2);
         }
-        
+
         queue.write_buffer(buffer, 0, bytemuck::cast_slice(&initial_data));
     }
 
@@ -341,8 +401,9 @@ impl State {
             Self::initialize_grid_buffer(&self.queue, &self.grid_buffers[0], self.grid_width, self.grid_height);
 
             // Recreate bind groups using the functions from the modules
+            // Note: The compute pipeline itself does *not* need to be recreated on resize
             self.compute_bind_groups = create_compute_bind_groups(
-                &self.device, &self.compute_bind_group_layout, &self.grid_buffers, 
+                &self.device, &self.compute_bind_group_layout, &self.grid_buffers,
                 &self.sim_param_buffer, &self.rules_buffer
             );
              self.render_bind_groups = create_render_bind_groups(
@@ -366,13 +427,15 @@ impl State {
         }
     }
 
-    /// Change the Game of Life rules
+    /// Change the Game of Life rules (parameterized approach, retained for compatibility/flexibility)
     pub fn change_rules(&mut self, rules: GameRules) {
         self.current_rules = rules;
         let shader_rules = ShaderGameRules::from(&self.current_rules);
         self.queue.write_buffer(&self.rules_buffer, 0, bytemuck::bytes_of(&shader_rules));
-        log::info!("Game rules changed to: S{}-{}/B{}", 
+        log::info!("Game rules (uniform buffer) changed to: S{}-{}/B{}",
                    rules.survival_min, rules.survival_max, rules.birth_count);
+        // Note: This only changes the uniform buffer. To swap the actual shader logic,
+        // call `load_new_compute_shader` with the new WGSL source.
     }
 
     pub fn update_and_render(&mut self) {
@@ -380,10 +443,10 @@ impl State {
         self.queue.write_buffer(&self.sim_param_buffer, 0, bytemuck::bytes_of(&SimParams {
             width: self.grid_width,
             height: self.grid_height,
-            seed: self.frame_num as u32,
+            seed: self.frame_num as u32, // Use frame_num as seed for random changes
             _pad: 0,
         }));
-        
+
         // --- Compute Pass ---
         let mut compute_encoder = self.device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Compute Encoder") });
@@ -392,7 +455,7 @@ impl State {
                 label: Some("Game of Life Compute Pass"),
                 timestamp_writes: None,
             });
-            compute_pass.set_pipeline(&self.compute_pipeline);
+            compute_pass.set_pipeline(&self.compute_pipeline); // Use the current pipeline
             compute_pass.set_bind_group(0, &self.compute_bind_groups[self.frame_num % 2], &[]);
             let dispatch_x = (self.grid_width + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
             let dispatch_y = (self.grid_height + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
@@ -468,22 +531,9 @@ impl State {
                 }
                 let idx = (cy as u32 * self.grid_width + cx as u32) as usize;
                 let val: [f32;1] = [1.0];
+                // Write to the *input* buffer for the *next* frame's compute pass
                 self.queue.write_buffer(&self.grid_buffers[self.frame_num % 2], idx as u64 * 4, bytemuck::bytes_of(&val));
             }
         }
-    }
-
-    pub fn resize_grid(&mut self, new_width: u32, new_height: u32) {
-        // Create new grid buffers with the new size
-        let (new_grid_buffers, new_sim_param_buffer) = 
-            Self::create_grid_buffers(&self.device, new_width, new_height);
-        
-        // Initialize with zeros
-        self.queue.write_buffer(&new_sim_param_buffer, 0, bytemuck::bytes_of(&SimParams { 
-            width: new_width, 
-            height: new_height,
-            seed: self.frame_num as u32,
-            _pad: 0
-        }));
     }
 } 

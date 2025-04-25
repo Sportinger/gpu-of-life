@@ -17,6 +17,9 @@ A high-performance cellular automaton simulator powered by GPU compute shaders. 
 - **Zoom & Pan**: Navigate across the simulation space
 - **Lucky Cells**: 10% chance for dying cells to survive and turn red!
 - **Configurable Rules**: Classic Conway's rules with customization options
+- **Dynamic Rule System**: Hot-swappable shader rules that can be changed at runtime
+- **Modular Architecture**: Clean separation of rule definitions, patterns, and shader logic
+- **API-Ready**: Designed to integrate with external APIs (like AI) for generating new rules
 
 ## 🎮 Controls
 
@@ -35,6 +38,11 @@ This simulation follows Conway's Game of Life rules with an extra twist:
 4. Any dead cell with exactly 3 live neighbors becomes alive
 5. **Special Rule**: When a cell would normally die, it has a 10% chance to survive and turn red!
 
+The simulation provides ready-made presets:
+- **Conway's Game of Life**: The classic ruleset (B3/S23)
+- **HighLife**: A variant with self-replicating patterns (B36/S23)
+- **Day & Night**: A complex ruleset with symmetric behavior (B3678/S34678)
+
 ## 🔧 Technical Details
 
 Built with Rust and WGPU, this simulator leverages your GPU's parallel processing power:
@@ -43,11 +51,21 @@ Built with Rust and WGPU, this simulator leverages your GPU's parallel processin
 - **WGPU**: Cross-platform GPU compute and rendering
 - **Compute Shaders**: WGSL code running directly on the GPU
 - **Double Buffering**: Ping-pong buffer technique for cellular simulation
+- **Dynamic Shader Compilation**: Ability to recompile and swap compute shaders at runtime
 
 The simulation state is represented as:
 - `0.0`: Dead cell (black)
 - `1.0`: Live cell (white)
 - `2.0`: Lucky cell that survived death (red)
+
+### Modular Architecture
+
+The project features a modular design for maximum flexibility:
+
+- **Rule Parameters**: Separated into configurable structures for quick adjustment
+- **Rule Definitions**: WGSL shader code can be swapped entirely at runtime
+- **Pattern Library**: Predefined patterns (gliders, oscillators, etc.) available for initializing simulations
+- **Dynamic Loading**: Infrastructure for loading new rule definitions during execution
 
 ## 🚀 Getting Started
 
@@ -73,6 +91,7 @@ The GPU implementation allows for real-time simulation of much larger grids than
 - Easily handles 1024×1024 grids at 60+ FPS on most modern GPUs
 - Brush tool with adjustable size for easy pattern creation
 - Efficient zoom and pan implementation for navigating large simulations
+- Minimal performance impact when hot-swapping rule systems
 
 ## 🛠️ Future Improvements
 
@@ -81,6 +100,9 @@ The GPU implementation allows for real-time simulation of much larger grids than
 - Statistics display (population, generation count)
 - Simulation speed control
 - Save/load functionality
+- **AI Rule Generation**: Integration with AI services to create novel cellular automaton rules
+- **Rule Creation UI**: Visual interface for creating and experimenting with custom rules
+- **Rule Sharing**: Community sharing of interesting rule sets and initial states
 
 ## 📜 License
 
