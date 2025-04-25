@@ -19,10 +19,46 @@ use std::time::Duration; // For throttling
 // Cursor modes for different tools
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CursorMode {
-    Paint,          // Default - paint cells
-    PlaceGlider,    // Place gliders
-    ClearArea,      // Clear cells in an area
-    RandomFill,     // Fill with random cells
+    Paint,               // Default - paint cells
+    PlaceGlider,         // Place standard gliders
+    PlaceLWSS,           // Place lightweight spaceships
+    PlacePulsar,         // Place pulsar oscillator
+    PlaceGosperGun,      // Place Gosper glider gun
+    PlacePentadecathlon, // Place pentadecathlon oscillator
+    PlaceSimkinGun,      // Place Simkin glider gun
+    ClearArea,           // Clear cells in an area
+    RandomFill,          // Fill with random cells
+}
+
+// Cell colors for placed cells
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CellColor {
+    White,  // Default white (1.0)
+    Red,    // Red (3.0)
+    Green,  // Green (4.0)
+    Blue,   // Blue (5.0)
+    Yellow, // Yellow (6.0)
+    Purple, // Purple (7.0)
+}
+
+impl Default for CellColor {
+    fn default() -> Self {
+        Self::White
+    }
+}
+
+impl CellColor {
+    // Convert the enum to its float representation for the shader
+    pub fn to_value(&self) -> f32 {
+        match self {
+            CellColor::White => 1.0,
+            CellColor::Red => 3.0,
+            CellColor::Green => 4.0,
+            CellColor::Blue => 5.0,
+            CellColor::Yellow => 6.0,
+            CellColor::Purple => 7.0,
+        }
+    }
 }
 
 impl Default for CursorMode {
@@ -77,6 +113,11 @@ pub struct State {
     pub last_paint_time: Option<std::time::Instant>,
     pub last_clear_time: Option<std::time::Instant>,
     pub last_random_time: Option<std::time::Instant>,
+    pub last_lwss_time: Option<std::time::Instant>,
+    pub last_pulsar_time: Option<std::time::Instant>,
+    pub last_gosper_gun_time: Option<std::time::Instant>,
+    pub last_pentadecathlon_time: Option<std::time::Instant>,
+    pub last_simkin_gun_time: Option<std::time::Instant>,
 
     // Context menu state
     pub right_click_start_pos: Option<PhysicalPosition<f64>>,
@@ -96,6 +137,7 @@ pub struct State {
     pub lucky_rule_enabled: bool,
     pub brush_radius: u32,
     pub lucky_chance_percent: u32,
+    pub current_cell_color: CellColor, // Current color for placed cells
     // Cell counting state
     pub live_cell_count: Option<u32>,
     pub last_count_update_time: Option<Instant>,
@@ -424,6 +466,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             last_paint_time: None,
             last_clear_time: None,
             last_random_time: None,
+            last_lwss_time: None,
+            last_pulsar_time: None,
+            last_gosper_gun_time: None,
+            last_pentadecathlon_time: None,
+            last_simkin_gun_time: None,
+            current_cell_color: CellColor::default(),
         };
 
         // Now compile the *real* initial pipeline
@@ -797,7 +845,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     continue;
                 }
                 let idx = (cy as u32 * self.grid_width + cx as u32) as usize;
-                let val: [f32;1] = [1.0];
+                let val: [f32;1] = [self.current_cell_color.to_value()];
                 // Write to the *input* buffer for the *next* frame's compute pass
                 self.queue.write_buffer(&self.grid_buffers[self.frame_num % 2], idx as u64 * 4, bytemuck::bytes_of(&val));
             }
@@ -856,22 +904,213 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         
         // Place the glider cells
         for (dx, dy) in &glider_cells {
-            let cx = gx + dx;
-            let cy = gy + dy;
-            
-            if cx < 0 || cy < 0 || cx >= self.grid_width as i32 || cy >= self.grid_height as i32 {
-                continue; // Skip out of bounds cells
-            }
-            
-            let idx = (cy as u32 * self.grid_width + cx as u32) as usize;
-            let val: [f32;1] = [1.0];
-            // Write to the *input* buffer for the *next* frame's compute pass
-            self.queue.write_buffer(&self.grid_buffers[self.frame_num % 2], idx as u64 * 4, bytemuck::bytes_of(&val));
+            self.set_cell_alive(gx + dx, gy + dy);
         }
         
         log::info!("Placed glider at grid position ({}, {})", gx, gy);
     }
     
+    /// Place a lightweight spaceship at the specified screen position
+    pub fn place_lwss(&mut self, screen_pos: PhysicalPosition<f64>) {
+        let (gx, gy) = self.screen_to_grid(screen_pos);
+        
+        // Skip if out of bounds
+        if gx < 0 || gy < 0 || gx >= self.grid_width as i32 || gy >= self.grid_height as i32 {
+            return;
+        }
+        
+        // Lightweight spaceship pattern
+        let lwss_cells = [
+            (0, 1), (0, 3),
+            (1, 0),
+            (2, 0),
+            (3, 0), (3, 3),
+            (4, 0), (4, 1), (4, 2)
+        ];
+        
+        // Place the cells
+        for (dx, dy) in &lwss_cells {
+            self.set_cell_alive(gx + dx, gy + dy);
+        }
+        
+        log::info!("Placed lightweight spaceship at grid position ({}, {})", gx, gy);
+    }
+    
+    /// Place a pulsar at the specified screen position
+    pub fn place_pulsar(&mut self, screen_pos: PhysicalPosition<f64>) {
+        let (gx, gy) = self.screen_to_grid(screen_pos);
+        
+        // Skip if out of bounds
+        if gx < 0 || gy < 0 || gx >= self.grid_width as i32 || gy >= self.grid_height as i32 {
+            return;
+        }
+        
+        // Pulsar pattern (period 3 oscillator)
+        let pulsar_cells = [
+            // Top horizontal lines
+            (2, 0), (3, 0), (4, 0), (8, 0), (9, 0), (10, 0),
+            // Top middle horizontal lines
+            (2, 5), (3, 5), (4, 5), (8, 5), (9, 5), (10, 5),
+            // Bottom middle horizontal lines
+            (2, 7), (3, 7), (4, 7), (8, 7), (9, 7), (10, 7),
+            // Bottom horizontal lines
+            (2, 12), (3, 12), (4, 12), (8, 12), (9, 12), (10, 12),
+            
+            // Left vertical lines
+            (0, 2), (0, 3), (0, 4), (0, 8), (0, 9), (0, 10),
+            // Left middle vertical lines
+            (5, 2), (5, 3), (5, 4), (5, 8), (5, 9), (5, 10),
+            // Right middle vertical lines
+            (7, 2), (7, 3), (7, 4), (7, 8), (7, 9), (7, 10),
+            // Right vertical lines
+            (12, 2), (12, 3), (12, 4), (12, 8), (12, 9), (12, 10),
+        ];
+        
+        // Place the cells
+        for (dx, dy) in &pulsar_cells {
+            self.set_cell_alive(gx + dx, gy + dy);
+        }
+        
+        log::info!("Placed pulsar at grid position ({}, {})", gx, gy);
+    }
+    
+    /// Place a Gosper glider gun at the specified screen position
+    pub fn place_gosper_glider_gun(&mut self, screen_pos: PhysicalPosition<f64>) {
+        let (gx, gy) = self.screen_to_grid(screen_pos);
+        
+        // Skip if out of bounds
+        if gx < 0 || gy < 0 || gx >= self.grid_width as i32 || gy >= self.grid_height as i32 {
+            return;
+        }
+        
+        // Gosper glider gun pattern
+        let gun_cells = [
+            // Left block
+            (1, 5), (1, 6),
+            (2, 5), (2, 6),
+
+            // Left ship
+            (11, 5), (11, 6), (11, 7),
+            (12, 4), (12, 8),
+            (13, 3), (13, 9),
+            (14, 3), (14, 9),
+            (15, 6),
+            (16, 4), (16, 8),
+            (17, 5), (17, 6), (17, 7),
+            (18, 6),
+
+            // Right ship
+            (21, 3), (21, 4), (21, 5),
+            (22, 3), (22, 4), (22, 5),
+            (23, 2), (23, 6),
+            (25, 1), (25, 2), (25, 6), (25, 7),
+
+            // Right block
+            (35, 3), (35, 4),
+            (36, 3), (36, 4)
+        ];
+        
+        // Place the cells
+        for (dx, dy) in &gun_cells {
+            self.set_cell_alive(gx + dx, gy + dy);
+        }
+        
+        log::info!("Placed Gosper glider gun at grid position ({}, {})", gx, gy);
+    }
+    
+    /// Place a pentadecathlon (period 15 oscillator) at the specified screen position
+    pub fn place_pentadecathlon(&mut self, screen_pos: PhysicalPosition<f64>) {
+        let (gx, gy) = self.screen_to_grid(screen_pos);
+        
+        // Skip if out of bounds
+        if gx < 0 || gy < 0 || gx >= self.grid_width as i32 || gy >= self.grid_height as i32 {
+            return;
+        }
+        
+        // Pentadecathlon pattern
+        let penta_cells = [
+            (1, 0), 
+            (2, 0), 
+            (3, -1), (3, 1),
+            (4, 0),
+            (5, 0),
+            (6, 0),
+            (7, 0),
+            (8, -1), (8, 1),
+            (9, 0),
+            (10, 0)
+        ];
+        
+        // Place the cells
+        for (dx, dy) in &penta_cells {
+            self.set_cell_alive(gx + dx, gy + dy);
+        }
+        
+        log::info!("Placed pentadecathlon at grid position ({}, {})", gx, gy);
+    }
+    
+    /// Place a Simkin glider gun (smaller than Gosper) at the specified screen position
+    pub fn place_simkin_glider_gun(&mut self, screen_pos: PhysicalPosition<f64>) {
+        let (gx, gy) = self.screen_to_grid(screen_pos);
+        
+        // Skip if out of bounds
+        if gx < 0 || gy < 0 || gx >= self.grid_width as i32 || gy >= self.grid_height as i32 {
+            return;
+        }
+        
+        // Simkin glider gun pattern
+        let simkin_cells = [
+            // Left blocks
+            (0, 0), (0, 1), (1, 0), (1, 1),
+            (4, 0), (4, 1), (5, 0), (5, 1),
+            
+            // Right side pattern 
+            (10, 2), (10, 3), (11, 2), (11, 3),
+            
+            (12, 0), (13, 0), (12, 1), (13, 1),
+            
+            (14, 10), (14, 11), (15, 10), (15, 11),
+            
+            (16, 8), (16, 9), (17, 7), (18, 7),
+            (17, 11), (18, 11), (19, 9), (19, 10),
+            
+            (20, 10),
+            
+            (21, 8),
+            
+            (22, 9), (22, 10), (22, 11),
+            
+            (24, 10), (24, 9), (24, 8),
+            
+            (24, 7), (25, 7),
+            
+            (26, 8), (26, 6),
+            
+            (27, 6), (27, 10),
+            
+            (28, 9)
+        ];
+        
+        // Place the cells
+        for (dx, dy) in &simkin_cells {
+            self.set_cell_alive(gx + dx, gy + dy);
+        }
+        
+        log::info!("Placed Simkin glider gun at grid position ({}, {})", gx, gy);
+    }
+    
+    /// Helper function to set a cell to alive state
+    fn set_cell_alive(&mut self, x: i32, y: i32) {
+        if x < 0 || y < 0 || x >= self.grid_width as i32 || y >= self.grid_height as i32 {
+            return; // Skip out of bounds cells
+        }
+        
+        let idx = (y as u32 * self.grid_width + x as u32) as usize;
+        let val: [f32;1] = [self.current_cell_color.to_value()];
+        // Write to the *input* buffer for the *next* frame's compute pass
+        self.queue.write_buffer(&self.grid_buffers[self.frame_num % 2], idx as u64 * 4, bytemuck::bytes_of(&val));
+    }
+
     /// Clear an area around the specified screen position
     pub fn clear_area(&mut self, screen_pos: PhysicalPosition<f64>, radius: u32) {
         let (gx, gy) = self.screen_to_grid(screen_pos);
@@ -932,7 +1171,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 // Only fill some cells based on density
                 if random_val < density {
                     let idx = (cy as u32 * self.grid_width + cx as u32) as usize;
-                    let val: [f32;1] = [1.0]; // Set to alive (1.0)
+                    let val: [f32;1] = [self.current_cell_color.to_value()]; // Set to alive (1.0)
                     self.queue.write_buffer(&self.grid_buffers[self.frame_num % 2], idx as u64 * 4, bytemuck::bytes_of(&val));
                 }
             }

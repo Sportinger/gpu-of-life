@@ -239,6 +239,41 @@ fn apply_cursor_mode_action(state: &mut State, position: PhysicalPosition<f64>, 
                 true
             }
         },
+        CursorMode::PlaceLWSS => {
+            if let Some(last_time) = state.last_lwss_time {
+                calculate_should_perform(last_time, now, drag_speed)
+            } else {
+                true
+            }
+        },
+        CursorMode::PlacePulsar => {
+            if let Some(last_time) = state.last_pulsar_time {
+                calculate_should_perform(last_time, now, drag_speed)
+            } else {
+                true
+            }
+        },
+        CursorMode::PlaceGosperGun => {
+            if let Some(last_time) = state.last_gosper_gun_time {
+                calculate_should_perform(last_time, now, drag_speed)
+            } else {
+                true
+            }
+        },
+        CursorMode::PlacePentadecathlon => {
+            if let Some(last_time) = state.last_pentadecathlon_time {
+                calculate_should_perform(last_time, now, drag_speed)
+            } else {
+                true
+            }
+        },
+        CursorMode::PlaceSimkinGun => {
+            if let Some(last_time) = state.last_simkin_gun_time {
+                calculate_should_perform(last_time, now, drag_speed)
+            } else {
+                true
+            }
+        },
         CursorMode::ClearArea => {
             if let Some(last_time) = state.last_clear_time {
                 calculate_should_perform(last_time, now, drag_speed)
@@ -262,6 +297,11 @@ fn apply_cursor_mode_action(state: &mut State, position: PhysicalPosition<f64>, 
         match state.cursor_mode {
             CursorMode::Paint => state.last_paint_time = Some(now),
             CursorMode::PlaceGlider => state.last_glider_time = Some(now),
+            CursorMode::PlaceLWSS => state.last_lwss_time = Some(now),
+            CursorMode::PlacePulsar => state.last_pulsar_time = Some(now),
+            CursorMode::PlaceGosperGun => state.last_gosper_gun_time = Some(now),
+            CursorMode::PlacePentadecathlon => state.last_pentadecathlon_time = Some(now),
+            CursorMode::PlaceSimkinGun => state.last_simkin_gun_time = Some(now),
             CursorMode::ClearArea => state.last_clear_time = Some(now),
             CursorMode::RandomFill => state.last_random_time = Some(now),
         }
@@ -310,6 +350,21 @@ fn perform_action(state: &mut State, position: PhysicalPosition<f64>, mode: crat
         CursorMode::PlaceGlider => {
             state.place_glider(position);
         },
+        CursorMode::PlaceLWSS => {
+            state.place_lwss(position);
+        },
+        CursorMode::PlacePulsar => {
+            state.place_pulsar(position);
+        },
+        CursorMode::PlaceGosperGun => {
+            state.place_gosper_glider_gun(position);
+        },
+        CursorMode::PlacePentadecathlon => {
+            state.place_pentadecathlon(position);
+        },
+        CursorMode::PlaceSimkinGun => {
+            state.place_simkin_glider_gun(position);
+        },
         CursorMode::ClearArea => {
             state.clear_area(position, 15);
         },
@@ -324,6 +379,10 @@ pub fn handle_cursor_left(state: &mut State) {
     // Don't reset is_right_mouse_pressed here, only reset last_mouse_pos
     // This allows dragging to continue even if cursor momentarily leaves and re-enters
     state.last_mouse_pos = None;
+    
+    // Close context menu and submenu when cursor leaves the window
+    state.show_context_menu = false;
+    state.show_submenu = false;
 }
 
 // Clamp view_offset so the visible area never moves outside the grid

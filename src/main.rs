@@ -233,6 +233,62 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                 ui.add(egui::Slider::new(&mut state.brush_radius, 0..=20).text("Brush Radius"));
                                 ui.separator();
 
+                                // Add cell color selection to the main menu
+                                ui.label("Cell Color:");
+                                ui.horizontal(|ui| {
+                                    // Display current color as a colored circle
+                                    let current_color = match state.current_cell_color {
+                                        crate::state::CellColor::White => egui::Color32::WHITE,
+                                        crate::state::CellColor::Red => egui::Color32::RED,
+                                        crate::state::CellColor::Green => egui::Color32::GREEN,
+                                        crate::state::CellColor::Blue => egui::Color32::from_rgb(0, 120, 255),
+                                        crate::state::CellColor::Yellow => egui::Color32::YELLOW,
+                                        crate::state::CellColor::Purple => egui::Color32::from_rgb(200, 100, 255),
+                                    };
+                                    
+                                    // Show a color indicator
+                                    let (rect, _) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
+                                    ui.painter().circle_filled(
+                                        rect.center(), 
+                                        10.0, 
+                                        current_color
+                                    );
+                                    
+                                    ui.label(format!("Current: {}", match state.current_cell_color {
+                                        crate::state::CellColor::White => "White",
+                                        crate::state::CellColor::Red => "Red",
+                                        crate::state::CellColor::Green => "Green",
+                                        crate::state::CellColor::Blue => "Blue",
+                                        crate::state::CellColor::Yellow => "Yellow",
+                                        crate::state::CellColor::Purple => "Purple",
+                                    }));
+                                });
+                                
+                                // Add color buttons in a grid
+                                ui.horizontal(|ui| {
+                                    if ui.button("White").clicked() {
+                                        state.current_cell_color = crate::state::CellColor::White;
+                                    }
+                                    if ui.button("Red").clicked() {
+                                        state.current_cell_color = crate::state::CellColor::Red;
+                                    }
+                                    if ui.button("Green").clicked() {
+                                        state.current_cell_color = crate::state::CellColor::Green;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    if ui.button("Blue").clicked() {
+                                        state.current_cell_color = crate::state::CellColor::Blue;
+                                    }
+                                    if ui.button("Yellow").clicked() {
+                                        state.current_cell_color = crate::state::CellColor::Yellow;
+                                    }
+                                    if ui.button("Purple").clicked() {
+                                        state.current_cell_color = crate::state::CellColor::Purple;
+                                    }
+                                });
+                                ui.separator();
+
                                 ui.checkbox(&mut state.lucky_rule_enabled, "Enable Lucky Red Cells");
                                 ui.separator();
 
@@ -341,8 +397,31 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                         // Submenu (if shown)
                         if state.show_submenu {
                             if let Some(pos) = state.submenu_pos {
-                                // Position the submenu slightly offset from the context menu
-                                let submenu_pos = egui::pos2((pos.x + 150.0) as f32, pos.y as f32);
+                                // Define a width for the submenu, depending on the parent type
+                                let submenu_width = match state.submenu_parent.as_ref().map(|s| s.as_str()) {
+                                    Some("glider") => 220.0, // Wider for glider submenu (has longer options)
+                                    Some("paint") => 220.0, // Wider for paint submenu (has more options)
+                                    _ => 150.0,
+                                };
+                                
+                                // Check if the submenu would go off-screen on the right side
+                                let window_width = state.size.width as f32;
+                                let submenu_right_edge = pos.x as f32 + 150.0 + submenu_width;
+                                let would_be_offscreen = submenu_right_edge > window_width;
+                                let offscreen_percent = if would_be_offscreen {
+                                    (submenu_right_edge - window_width) / submenu_width * 100.0
+                                } else {
+                                    0.0
+                                };
+                                
+                                // If more than 10% would be off-screen, position on the left
+                                let submenu_pos = if offscreen_percent > 10.0 {
+                                    // Position on the left side (offset by submenu width + some padding)
+                                    egui::pos2((pos.x as f32 - submenu_width - 10.0), pos.y as f32)
+                                } else {
+                                    // Position on the right side as before
+                                    egui::pos2((pos.x + 150.0) as f32, pos.y as f32)
+                                };
                                 
                                 egui::Area::new(egui::Id::new("submenu"))
                                     .movable(false)
@@ -353,7 +432,8 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                         egui::Frame::popup(&state.egui_ctx.style())
                                             .fill(egui::Color32::from_rgba_unmultiplied(25, 25, 25, 204)) // 80% opaque (20% transparent)
                                             .show(ui, |ui| {
-                                                ui.set_min_width(150.0);
+                                                // Set exact width based on content
+                                                ui.set_max_width(submenu_width);
                                                 
                                                 // Display a header showing which option this submenu is for
                                                 if let Some(parent) = &state.submenu_parent {
@@ -366,23 +446,152 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                                     ui.separator();
                                                 }
                                                 
-                                                // Submenu options (3 dummy options)
-                                                if ui.button("Submenu Option 1").clicked() {
-                                                    log::info!("Submenu option 1 selected");
-                                                    state.show_submenu = false;
-                                                    state.show_context_menu = false;
-                                                }
-                                                
-                                                if ui.button("Submenu Option 2").clicked() {
-                                                    log::info!("Submenu option 2 selected");
-                                                    state.show_submenu = false;
-                                                    state.show_context_menu = false;
-                                                }
-                                                
-                                                if ui.button("Submenu Option 3").clicked() {
-                                                    log::info!("Submenu option 3 selected");
-                                                    state.show_submenu = false;
-                                                    state.show_context_menu = false;
+                                                // Different submenu options based on the parent
+                                                if let Some(parent) = &state.submenu_parent {
+                                                    match parent.as_str() {
+                                                        "glider" => {
+                                                            // Show different structure placement options
+                                                            if ui.button("Standard Glider").clicked() {
+                                                                state.cursor_mode = crate::state::CursorMode::PlaceGlider;
+                                                                state.show_submenu = false;
+                                                                state.show_context_menu = false;
+                                                                log::info!("Selected Standard Glider");
+                                                            }
+                                                            
+                                                            if ui.button("Lightweight Spaceship").clicked() {
+                                                                state.cursor_mode = crate::state::CursorMode::PlaceLWSS;
+                                                                state.show_submenu = false;
+                                                                state.show_context_menu = false;
+                                                                log::info!("Selected Lightweight Spaceship");
+                                                            }
+                                                            
+                                                            if ui.button("Pulsar (Period 3)").clicked() {
+                                                                state.cursor_mode = crate::state::CursorMode::PlacePulsar;
+                                                                state.show_submenu = false;
+                                                                state.show_context_menu = false;
+                                                                log::info!("Selected Pulsar");
+                                                            }
+                                                            
+                                                            if ui.button("Pentadecathlon (Period 15)").clicked() {
+                                                                state.cursor_mode = crate::state::CursorMode::PlacePentadecathlon;
+                                                                state.show_submenu = false;
+                                                                state.show_context_menu = false;
+                                                                log::info!("Selected Pentadecathlon");
+                                                            }
+                                                            
+                                                            if ui.button("Gosper Glider Gun").clicked() {
+                                                                state.cursor_mode = crate::state::CursorMode::PlaceGosperGun;
+                                                                state.show_submenu = false;
+                                                                state.show_context_menu = false;
+                                                                log::info!("Selected Gosper Glider Gun");
+                                                            }
+                                                            
+                                                            if ui.button("Simkin Glider Gun").clicked() {
+                                                                state.cursor_mode = crate::state::CursorMode::PlaceSimkinGun;
+                                                                state.show_submenu = false;
+                                                                state.show_context_menu = false;
+                                                                log::info!("Selected Simkin Glider Gun");
+                                                            }
+                                                        },
+                                                        "paint" => {
+                                                            // Show color selection options
+                                                            ui.heading("Cell Color Options");
+                                                            ui.separator();
+                                                            
+                                                            // White color option
+                                                            if ui.add(egui::Button::new(
+                                                                egui::RichText::new("White")
+                                                                    .color(egui::Color32::WHITE)
+                                                                    .background_color(egui::Color32::from_rgba_premultiplied(50, 50, 50, 200))
+                                                            )).clicked() {
+                                                                state.current_cell_color = crate::state::CellColor::White;
+                                                                state.show_submenu = false;
+                                                                state.show_context_menu = false;
+                                                                log::info!("Selected White cell color");
+                                                            }
+                                                            
+                                                            // Red color option
+                                                            if ui.add(egui::Button::new(
+                                                                egui::RichText::new("Red")
+                                                                    .color(egui::Color32::RED)
+                                                                    .background_color(egui::Color32::from_rgba_premultiplied(50, 50, 50, 200))
+                                                            )).clicked() {
+                                                                state.current_cell_color = crate::state::CellColor::Red;
+                                                                state.show_submenu = false;
+                                                                state.show_context_menu = false;
+                                                                log::info!("Selected Red cell color");
+                                                            }
+                                                            
+                                                            // Green color option
+                                                            if ui.add(egui::Button::new(
+                                                                egui::RichText::new("Green")
+                                                                    .color(egui::Color32::GREEN)
+                                                                    .background_color(egui::Color32::from_rgba_premultiplied(50, 50, 50, 200))
+                                                            )).clicked() {
+                                                                state.current_cell_color = crate::state::CellColor::Green;
+                                                                state.show_submenu = false;
+                                                                state.show_context_menu = false;
+                                                                log::info!("Selected Green cell color");
+                                                            }
+                                                            
+                                                            // Blue color option
+                                                            if ui.add(egui::Button::new(
+                                                                egui::RichText::new("Blue")
+                                                                    .color(egui::Color32::from_rgb(0, 120, 255))
+                                                                    .background_color(egui::Color32::from_rgba_premultiplied(50, 50, 50, 200))
+                                                            )).clicked() {
+                                                                state.current_cell_color = crate::state::CellColor::Blue;
+                                                                state.show_submenu = false;
+                                                                state.show_context_menu = false;
+                                                                log::info!("Selected Blue cell color");
+                                                            }
+                                                            
+                                                            // Yellow color option
+                                                            if ui.add(egui::Button::new(
+                                                                egui::RichText::new("Yellow")
+                                                                    .color(egui::Color32::YELLOW)
+                                                                    .background_color(egui::Color32::from_rgba_premultiplied(50, 50, 50, 200))
+                                                            )).clicked() {
+                                                                state.current_cell_color = crate::state::CellColor::Yellow;
+                                                                state.show_submenu = false;
+                                                                state.show_context_menu = false;
+                                                                log::info!("Selected Yellow cell color");
+                                                            }
+                                                            
+                                                            // Purple color option
+                                                            if ui.add(egui::Button::new(
+                                                                egui::RichText::new("Purple")
+                                                                    .color(egui::Color32::from_rgb(200, 100, 255))
+                                                                    .background_color(egui::Color32::from_rgba_premultiplied(50, 50, 50, 200))
+                                                            )).clicked() {
+                                                                state.current_cell_color = crate::state::CellColor::Purple;
+                                                                state.show_submenu = false;
+                                                                state.show_context_menu = false;
+                                                                log::info!("Selected Purple cell color");
+                                                            }
+                                                        },
+                                                        // Add other submenu parent options...
+                                                        _ => {
+                                                            // Generic submenu options for other parent items
+                                                            if ui.button("Submenu Option 1").clicked() {
+                                                                log::info!("Submenu option 1 selected");
+                                                                state.show_submenu = false;
+                                                                state.show_context_menu = false;
+                                                            }
+                                                            
+                                                            if ui.button("Submenu Option 2").clicked() {
+                                                                log::info!("Submenu option 2 selected");
+                                                                state.show_submenu = false;
+                                                                state.show_context_menu = false;
+                                                            }
+                                                            
+                                                            if ui.button("Submenu Option 3").clicked() {
+                                                                log::info!("Submenu option 3 selected");
+                                                                state.show_submenu = false;
+                                                                state.show_context_menu = false;
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             });
                                     });
@@ -406,9 +615,51 @@ async fn run(event_loop: EventLoop<()>, window: Arc<Window>) {
                                         match state.cursor_mode {
                                             CursorMode::Paint => {
                                                 // Default mode, no special indicator
+                                                // Show the current color alongside the cursor
+                                                let color_text = match state.current_cell_color {
+                                                    crate::state::CellColor::White => "White",
+                                                    crate::state::CellColor::Red => "Red",
+                                                    crate::state::CellColor::Green => "Green",
+                                                    crate::state::CellColor::Blue => "Blue",
+                                                    crate::state::CellColor::Yellow => "Yellow",
+                                                    crate::state::CellColor::Purple => "Purple",
+                                                };
+                                                
+                                                let color = match state.current_cell_color {
+                                                    crate::state::CellColor::White => egui::Color32::WHITE,
+                                                    crate::state::CellColor::Red => egui::Color32::RED,
+                                                    crate::state::CellColor::Green => egui::Color32::GREEN,
+                                                    crate::state::CellColor::Blue => egui::Color32::from_rgb(0, 120, 255),
+                                                    crate::state::CellColor::Yellow => egui::Color32::YELLOW,
+                                                    crate::state::CellColor::Purple => egui::Color32::from_rgb(200, 100, 255),
+                                                };
+                                                
+                                                ui.label(egui::RichText::new(format!("🖌 Color: {}", color_text))
+                                                    .color(color)
+                                                    .background_color(egui::Color32::from_rgba_premultiplied(0, 0, 0, 200)));
                                             },
                                             CursorMode::PlaceGlider => {
                                                 ui.label(egui::RichText::new("🚀 Glider").color(egui::Color32::WHITE)
+                                                    .background_color(egui::Color32::from_rgba_premultiplied(0, 0, 0, 200)));
+                                            },
+                                            CursorMode::PlaceLWSS => {
+                                                ui.label(egui::RichText::new("🚀 Lightweight Spaceship").color(egui::Color32::WHITE)
+                                                    .background_color(egui::Color32::from_rgba_premultiplied(0, 0, 0, 200)));
+                                            },
+                                            CursorMode::PlacePulsar => {
+                                                ui.label(egui::RichText::new("🔄 Pulsar").color(egui::Color32::WHITE)
+                                                    .background_color(egui::Color32::from_rgba_premultiplied(0, 0, 0, 200)));
+                                            },
+                                            CursorMode::PlaceGosperGun => {
+                                                ui.label(egui::RichText::new("🔫 Gosper Gun").color(egui::Color32::WHITE)
+                                                    .background_color(egui::Color32::from_rgba_premultiplied(0, 0, 0, 200)));
+                                            },
+                                            CursorMode::PlacePentadecathlon => {
+                                                ui.label(egui::RichText::new("🔄 Pentadecathlon").color(egui::Color32::WHITE)
+                                                    .background_color(egui::Color32::from_rgba_premultiplied(0, 0, 0, 200)));
+                                            },
+                                            CursorMode::PlaceSimkinGun => {
+                                                ui.label(egui::RichText::new("🔫 Simkin Gun").color(egui::Color32::WHITE)
                                                     .background_color(egui::Color32::from_rgba_premultiplied(0, 0, 0, 200)));
                                             },
                                             CursorMode::ClearArea => {
